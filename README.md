@@ -11,3 +11,11 @@ with different IPTables ideas.
 
 I expect that the scripts will be BASH scripts, as it's the most
 direct way to interact with the CLI interface of IPTables.
+
+## Requirements
+
+The firewall will also be a DHCP server.  I will include a link
+to a page that seems helpful now, and I may add additional pages
+if needed and they merit.
+
+[Raspberry PI DHCP Server](http://www.noveldevices.co.uk/rp-dhcp-server)
