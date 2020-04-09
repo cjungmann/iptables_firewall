@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+is_root() { [ "$USER" = "root" ]; }
+
+reset_table()
+{
+    local -a flush_args=(
+        -F "$1"
+    )
+
+    local -a set_args=(
+        -A "$1"
+        -j ACCEPT
+    )
+
+    iptables "${flush_args[@]}"
+    iptables "${set_args[@]}"
+}
+
+if ! is_root; then
+    echo "You must be root to run this script."
+else
+    reset_table "INPUT"
+    reset_table "FORWARD"
+    reset_table "OUTPUT"
+fi
+

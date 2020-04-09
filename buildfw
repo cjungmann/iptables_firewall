@@ -1,0 +1,404 @@
+#!/usr/bin/env bash
+
+#######################################################
+# The script will set iptables for a simple firewall.
+# The FORWARD and OUTPUT tables will be configured to
+# allow traffic on the ports listed in Base_TCP_Ports.
+#
+# When the script is finished setting iptables, the
+# iptables settings will be listed using iptables-save
+#
+# If you are just testing this script, you will likely
+#  want to restore the minimum iptables settings.  This
+# can be done by invoking ./reset_tables.
+#######################################################
+
+declare INT_NET=
+declare E_EXT=
+declare E_INT=
+
+declare -a Base_TCP_Accept_Args
+
+declare -a Base_Log_Default_Drop_Args=(
+    -A XXTABLEXX
+    ! -i lo
+    -j LOG
+    --log-prefix "DROP "
+    --log-ip-options
+    --log-tcp-options
+)
+
+declare -a Base_TCP_Ports=( 21 22 25 43 80 443 4321 )
+
+
+is_root() { [ "$USER" = "root" ]; }
+
+find_option_index()
+{
+    local -n arr="$1"
+    local option_name="$2"
+    local el
+    local -i index=0
+
+    for el in "${arr[@]}"; do
+        if [ "$el" = "$option_name" ]; then
+            echo "$index"
+            return 0
+        fi
+        (( ++index ))
+    done
+
+    return 1
+}
+
+# Returns space-separated list of options after the named option has been deleted
+remove_array_option()
+{
+    local -n arr="$1"
+    local option_name="$2"
+    local -i ndx
+
+    ndx=$( find_option_index "$1" "$2" )
+    if [ "$?" -eq 0 ]; then
+        echo "${arr[*]:0:$ndx}" "${arr[*]:$(( ndx+2 ))}"
+    else
+        echo "${arr[*]}"
+    fi
+}
+
+# Function to test the utility of remove_array_option()
+test_remove_array_option()
+{
+    local -a test_arr=(
+        -A INPUT
+        -p tcp
+        -i wlp203021
+        -j ACCEPT
+    )
+
+    local -a result_arr=( $( remove_array_option "test_arr" "-i" ) )
+
+    echo "BEFORE: (${test_arr[*]})"
+    echo "AFTER: (${result_arr[*]})"
+}
+
+
+# Interpret ifconfig output to determine the inbound and outbound interfaces
+identify_interfaces()
+{
+    local -a ifaces=( $( ifconfig | grep -o -E  ^[[:alnum:]]+ - ) )
+    local iface iaddr
+    local -a addarr
+
+    local -n e_ext=E_EXT
+    local -n e_int=E_INT
+
+    local IFS="."
+
+    for iface in "${ifaces[@]}"; do
+        ipaddr=$( ifconfig | grep -A 1 "^${iface}" | grep -o -E 'inet (addr:)?[0-9]{1,3}(\.[[:digit:]]{1,3}){3}' | grep -o -E '[\.[:digit:]]+' )
+
+        if [ $? -eq 0 ]; then
+            addarr=( $ipaddr )
+
+            if [ "${#addarr[@]}" -eq 4 ]; then
+                if [ "${addarr[0]}" -eq 192 ] && [ "${addarr[1]}" -eq 168 ]; then
+                    e_int="$iface"
+                    INT_NET="${addarr[*]:0:3}.0/255.255.255.0"
+                elif [ "${addarr[0]}" -ne 127 ]; then
+                    e_ext="$ipaddr"
+                fi
+            else
+                echo "Invalid ipaddress: [32;1m${ipaddr}[m."
+            fi
+        fi
+    done
+
+
+    [ -n "$e_ext" ] && [ -n "$e_int" ]
+}
+
+# Flush iptables and add basic rules
+prep_iptables()
+{
+    # Flush existing rules:
+    iptables -F         # Flush (remove all rules) for all tables
+    iptables -F -t nat  # Flush NAT table
+    iptables -X         # Delete all user-defined chains
+
+    # Set default rules to drop packets
+    iptables -P INPUT DROP
+    iptables -P OUTPUT DROP
+    iptables -P FORWARD DROP
+
+    # Load connection-tracking modules
+    modprobe ip_conntrack
+    modprobe iptable_nat
+    modprobe ip_conntrack_ftp
+    modprobe ip_nat_ftp
+}
+
+# For a given table, add rules that identify new connections,
+# then accept packets from established connections.
+table_state_tracking()
+{
+    local Table="${1}"
+    local -a log_args=(
+        -A "$Table"
+        -m state
+        --state INVALID
+        -j LOG
+        --log-prefix "DROP INVALID "
+        --log-ip-options
+        --log-tcp-options
+    )
+
+    local -a drop_args=(
+        -A "$Table"
+        -m state
+        --state INVALID
+        -j DROP
+    )
+
+    local -a accept_args=(
+        -A "$Table"
+        -m state
+        --state ESTABLISHED,RELATED
+        -j ACCEPT
+    )
+
+    iptables "${log_args[@]}"
+    iptables "${drop_args[@]}"
+    iptables "${accept_args[@]}"
+}
+
+table_tcp_accept_rules()
+{
+    local -a Args=( $1 )
+    local -a Ports=( $2 )
+
+    local -i port
+    for port in "${Ports[@]}"; do
+        Args[5]=$port
+        iptables "${Args[@]}"
+    done
+}
+
+table_udp_accept_rules()
+{
+    local Table="${1}"
+    local -a Ports=( $2 )
+
+    local -a accept_arr=(
+        -A "$Table"
+        -p udp
+        --dport 0
+        -i "$E_INT"
+        -m state
+        --state NEW
+        -j ACCEPT
+    )
+
+    if [ "$Table" = "OUTPUT" ]; then
+        accept_arr=( $( remove_array_option "accept_arr" "-i" ) )
+    fi
+
+    local -i port
+    for port in "${Ports[@]}"; do
+        accept_arr[5]=$port
+        iptables "${accept_arr[@]}"
+    done
+}
+
+table_icmp_accept_rules()
+{
+    local Table="${1}"
+
+    local -a accept_arr=(
+        -A "$Table"
+        -p icmp
+        --icmp-type echo-request
+        -j ACCEPT
+    )
+
+    local -i port
+    for port in "${Ports[@]}"; do
+        accept_arr[5]=$port
+        iptables "${accept_arr[@]}"
+    done
+}
+
+anti_spoof_rules()
+{
+    local Table="${1}"
+
+    local -a log_args=(
+        -A "$Table"
+        -i "$E_INT"
+        ! -s "$INT_NET"
+        -j LOG
+        --log-prefix "SPOOFED PKT "
+    )
+
+    local -a drop_args=(
+        -A "$Table"
+        -i "$E_INT"
+        ! -s "$INT_NET"
+        -j DROP
+    )
+
+    iptables "${log_args[@]}"
+    iptables "${drop_args[@]}"
+}
+
+
+ensure_ipv4_flagged()
+{
+    local fname="${1}"
+    local path="/proc/sys/net/ipv4/$fname"
+
+    if ! [ -e "$path" ]; then
+        echo 1 > "$path"
+    fi
+}
+
+prepare_nat_rules()
+{
+    local -a masq_args=(
+        -t nat
+        -A POSTROUTING
+        -s "$INT_NET"
+        -o "$E_EXT"
+        -j MASQUERADE
+    )
+
+    local -a redir_args=(
+        -t nat
+        -A PREROUTING
+        -p tcp
+        --dport 80
+        -i "$E_EXT"
+        -j DNAT
+        --to "${lamphost}:80"
+    )
+
+    iptables "${masq_args[@]}"
+    iptables "${redir_args[@]}"
+
+    ensure_ipv4_flagged "ip_forward"
+    ensure_ipv4_flagged "ip_dynaddr"
+}
+
+prep_input_table()
+{
+    echo
+    echo "[32;1mAdding INPUT table rules[m"
+
+    table_state_tracking "INPUT"
+    anti_spoof_rules "INPUT"
+
+    local -a add_args=( ${Base_TCP_Accept_Args[@]} )
+    add_args[1]="INPUT"
+
+    table_tcp_accept_rules "${add_args[*]}" "22"   # Only allow ssh access (port 22)
+    table_icmp_accept_rules "INPUT"
+
+    local -a log_args=( "${Base_Log_Default_Drop_Args[@]}" )
+    log_args[1]="INPUT"
+    iptables "${log_args[@]}"
+}
+
+prep_output_table()
+{
+    echo
+    echo "[32;1mAdding OUPUT table rules[m"
+
+    table_state_tracking "OUTPUT"
+    # Assume local traffic (OUTPUT chain) will not attempt spoofin
+
+    local -a add_args=( ${Base_TCP_Accept_Args[@]} )
+    add_args[1]="OUTPUT"
+    add_args=( $( remove_array_option "add_args" "-i" ) )
+    add_args=( $( remove_array_option "add_args" "-s" ) )
+
+    local -a tcp_ports=( ${Base_TCP_Ports[@]} )
+
+    table_tcp_accept_rules "${add_args[*]}"  "${tcp_ports[*]}"
+
+    table_udp_accept_rules "OUTPUT" "53"
+    table_icmp_accept_rules "OUTPUT"
+
+    local -a log_args=( "${Base_Log_Default_Drop_Args[@]}" )
+    local -i ndx=$( find_option_index "log_args" "-i" )
+    if [ "$?" -eq 0 ]; then
+        log_args[$ndx]="-o"
+    fi
+    log_args[1]="OUTPUT"
+    iptables "${log_args[@]}"
+}
+
+prep_forward_table()
+{
+    echo
+    echo "[32;1mAdding FORWARD table rules[m"
+
+    table_state_tracking "FORWARD"
+    anti_spoof_rules "FORWARD"
+
+    local -a add_args=( ${Base_TCP_Accept_Args[@]} )
+    add_args[1]="FORWARD"
+
+    local -a tcp_ports=( ${Base_TCP_Ports[@]} )
+
+    table_tcp_accept_rules "${add_args[*]}" "${tcp_ports[*]}"
+
+    table_udp_accept_rules "FORWARD" "53"
+    table_icmp_accept_rules "FORWARD"
+
+    local -a log_args=( "${Base_Log_Default_Drop_Args[@]}" )
+    log_args[1]="FORWARD"
+    iptables "${log_args[@]}"
+}
+
+main()
+{
+    if ! identify_interfaces; then
+        echo "Failed to identify internal and external interfaces."
+        echo "Spooking the missing E_EXT with IP address of cnn.com"
+        echo
+        local -n e_ext=E_EXT
+        e_ext='151.101.193.67'
+        # exit
+    fi
+
+    local -n g_accept_args="Base_TCP_Accept_Args"
+    g_accept_args=(
+        -A XXTABLEXX
+        -p tcp
+        --dport 0
+        -i "$E_INT"
+        -s "$INT_NET"
+        --syn
+        -m state
+        --state NEW
+        -j ACCEPT
+    )
+
+    
+    if ! is_root; then
+        echo "You must be root to run this script." >&2
+        exit
+    fi
+
+    prep_iptables
+
+    prep_input_table
+    prep_output_table
+    prep_forward_table
+}
+
+
+# test_remove_array_option
+
+main
+iptables-save
