@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+
+# ni_info : Network Interface info
+# 
+# Initially a way to collect DNS addresses for configuring a
+# DHCP server, this utility may level-up with additional features
+# if future needs suggest.
+
+source bash_clargs
+
+declare OIFS="$IFS"
+declare IFS=$'\n'
+
+declare -a CLOPTS=(
+    "h|->show_usage|Show options usage"
+    "l|->list_interfaces|List active network interfaces"
+    "a|+>interface_addresses|Get interface DNS addresses"
+)
+IFS="$OIFS"
+
+declare -i OPTION_USED=0
+
+set_option_used()
+{
+    local -n ou="OPTION_USED"
+    ou=1
+}
+
+# Using Extended posix regular expression, treat special
+# characters like (, {, ., etc as regex characters, and these
+# characters must be escaped if they are to matched as text.
+#
+# This syntax works for BASH =~ as well as sed -E, so we can
+# reuse this expression.
+declare basic_ip_regex='([[:digit:]]{1,3})((.[[:digit:]]{1,3}){3})'
+
+declare -A NETLINKS=()
+
+# Function to populate the global array, NETLINKS
+collect_netlinks()
+{
+    local -n links="NETLINKS"
+    local IFS=$'|'
+
+    declare -a sections=( $( resolvectl status | sed 's/^[[:alnum:]][^:]\+$/|\0/' ))
+
+    declare section line
+    declare -a lines
+    for section in "${sections[@]}"; do
+        if [[ "$section" =~ ^Link[[:space:]][[:digit:]]+[[:space:]]\(([[:alnum:]]+)\) ]]; then
+            # Replace first line of section with interface name
+            IFS=$'\n'
+            lines=( $section )
+            links["${BASH_REMATCH[1]}"]="${lines[*]:1}"
+        fi
+    done
+}
+
+# Test if a link contains DNS servers
+test_for_dns_scope()
+{
+    [[ "$1" =~ [[:space:]]+Current[[:space:]]Scopes:[^\\n]+DNS[^\\n] ]];
+}
+
+# Test if a line introduces DNS Server IP addresses:
+test_first_dns_address()
+{
+    [[ "$1" =~ ^[[:space:]]+DNS\ Servers:\ ${basic_ip_regex}$ ]]
+}
+
+# Collect DNS ip addresses from a link
+collect_dns_ip_addresses()
+{
+    if [ "${#1}" -eq 0 ]; then
+        echo "Empty interface specs string." >&2
+        exit
+    fi
+
+    local IFS=$'\n'
+    local -a lines=( $1 )
+    local line
+    local -i collecting=0
+    for line in "${lines[@]}"; do
+        if [ "$collecting" -eq 0 ]; then
+            if  test_first_dns_address "$line"; then
+                collecting=1
+                if [[ "$line" =~ $basic_ip_regex ]]; then
+                    echo -n "${BASH_REMATCH[0]}"
+                else
+                    echo "Error, expected to find an IP address on this line." >&2
+                fi
+            fi
+        elif [ $collecting -eq 1 ]; then
+            if [[ "$line" =~ $basic_ip_regex ]]; then
+                echo -n " ${BASH_REMATCH[0]}"
+            else
+                echo
+                break
+            fi
+        fi
+    done
+}
+
+# Debugging function, not used for now
+collect_dnservers()
+{
+    local key linktext
+    for key in "${!NETLINKS[@]}"; do
+        linktest="${NETLINKS[$key]}"
+        if test_for_dns_scope "$linktest"; then
+            collect_dns_ip_addresses "$linktest"
+        fi
+    done
+}
+
+
+# bash_clargs functions
+list_interfaces()
+{
+    set_option_used
+    
+    local key
+    local seper
+    for key in "${!NETLINKS[@]}"; do
+        if [ "$seper" ]; then
+            echo -n "$seper"
+        else
+            seper=' '
+        fi
+
+        echo -n "$key"
+    done
+    echo
+}
+
+interface_addresses()
+{
+    set_option_used
+
+    local linkinfo="${NETLINKS[$1]}"
+    if [ "$linkinfo" ]; then
+        collect_dns_ip_addresses "$linkinfo"
+    else
+        echo "Unknown interface name [32;1m$1[m"
+    fi
+}
+
+show_usage()
+{
+    set_option_used
+
+    echo "With no parameters, this command will return the most"
+    echo "useful array, the DHCP-assigned interface name and the"
+    echo "DNS IP addresses assigned to that interface."
+    echo
+    echo "Otherwise, the following options are available:"
+    bash_clargs_usage
+}
+
+default_execution()
+{
+    echo "Doing default action"
+}
+
+
+collect_netlinks
+# collect_dnservers
+
+bash_clargs_process "$@"
+if [ "$OPTION_USED" -eq 0 ]; then
+    default_execution
+fi
+
