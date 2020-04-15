@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+declare source=dhcpd.leases
+
+convert_leases()
+{
+    local OIFS="$IFS"
+
+    # Break regular expression for easier development/debugging:
+    local re_arr_datetime=(
+        '\([[:digit:]]\{4\}\)'   # year
+        '[^[:digit:]]'           # separator
+        '\([[:digit:]]\{2\}\)'   # month
+        '[^[:digit:]]'           # separator
+        '\([[:digit:]]\{2\}\)'   # day
+        '[[:space:]]'            # date-from-time separator
+        '\([[:digit:]]\{2\}\)'   # hour
+        '[^[:digit:]]'           # separator
+        '\([[:digit:]]\{2\}\)'   # minute
+        '[^[:digit:]]'           # separator
+        '\([[:digit:]]\{2\}\)'   # second
+    )
+
+    # Construct regex from array
+    local IFS=''
+    local re_datetime="${re_arr_datetime[*]}"
+    IFS="$OIFS"
+
+    # Prefix with a single character ('|') each lease to allow
+    # BASH to create an array from the leases file:
+    declare -a sed_lease=(
+        -e '/^[^ l}{]/d'
+        -e '/^[[:space:]]*$/d'
+        -e 's/^lease/|lease/g'
+        -e 's/^  \(.\)/. \1/g'
+    )
+
+    # Lease field extraction arguments for sed and grep
+    local gre_ip='[[:digit:]]\{1,3\}\(\.[[:digit:]]\{1,3\}\)\{1,3\}'
+
+    local gre_mac='[0-9a-f]\{2\}\(:[0-9a-f]\{2\}\)\{5\}'
+
+    local -a sed_host=(
+        -n 's/^\. .*hostname \"\([^"]\+\)\";$/\1/p'
+    )
+
+    local -a sed_uid=(
+        -n 's/^\. uid \"\([^"`]\+\)`\";$/\1/p'
+    )
+
+    local -a sed_cltt=(
+        # Convert the date to ISO-8601 format:
+        -n "s/^\. cltt [[:digit:]] ${re_datetime}.*;/\1-\2-\3T\4:\5:\6/p"
+    )
+
+    # Begin extraction by creating an array of lease records
+    local -a leases
+    IFS=$'|'
+    leases=( $( sed "${sed_lease[@]}" $source ) )
+
+    # Variable into which to save each field
+    local l_ip l_mac l_host l_uid l_cltt
+
+    local lease
+    for lease in "${leases[@]}"; do
+        if [ "${#lease}" -gt 0 ]; then
+            l_ip=$(   grep -o $gre_ip      <<< "$lease" ) # Leases IP Address
+            l_map=$(  grep -o $gre_mac     <<< "$lease" ) # Client's MAC address
+            l_cltt=$( sed "${sed_cltt[@]}" <<< "$lease" ) # Client's Last Transaction Time (cltt)
+            l_host=$( sed "${sed_host[@]}" <<< "$lease" ) # Client's host name (if available)
+            l_uid=$(  sed "${sed_uid[@]}"  <<< "$lease" ) # Client's UID value (if available)
+
+            echo -n "$l_map"
+            echo -n "$IFS"
+
+            echo -n "$l_ip"
+            echo -n "$IFS"
+
+            echo -n "$cltt"
+            echo -n "$IFS"
+
+            echo -n "$l_host"
+            echo -n "$IFS"
+            
+            echo -n "$l_uid"
+            echo
+        fi
+    done
+}
+
+
+
+convert_leases
