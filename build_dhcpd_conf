@@ -1,34 +1,93 @@
 #!/usr/bin/env bash
 
+declare ROW_DELIM=$'\n'
+declare FIELD_DELIM=$'|'
+
+source bash_clargs
+
 declare UPDATE_STYLE=none
 declare DEFAULT_LEASE_TIME=600
 declare MAX_LEASE_TIME=7200
+declare WAN_IF
+declare LAN_IF
 
-declare DN_SERVERS
+declare -a DN_SERVERS
 
 # This DHCP server also serves as the NAT server, so the
 # IP address of LAN_IFACE will be the 'router' value.
 declare LAN_IFACE
+
+declare OIFS="$IFS"
+IFS=$'\n'
+
+declare -a CLOPTS=(
+    "d|DEFAULT_LEASE_TIME|Default Lease Time"
+    "u|UPDATE_STYLE|Update style"
+    "m|MAX_LEASE_TIME|Max Lease Time"
+    "w|WAN_IF|WAN Interface"
+    "l|LAN_IF|LAN Interface"
+    "h|->bash_clargs_usage|Show options and meanings"
+    "s|->bash_clargs_show|Show current state of arguments."
+)
+
+IFS="$OIFS"
 
 
 
 
 set_dn_servers()
 {
-    sed -E -n "s/^nameserver ([.[:digit:]]+)$/\1/p" /etc/resolv.conf
+    local -n servers="DN_SERVERS"
+
+    local IFS=$'\n'
+    local -a nifaces
+    nifaces=( $( ./ni_info -d ) )
+
+    local niface
+    local -a nirow
+    local ipaddr
+
+    for niface in "${nifaces[@]}"; do
+        IFS=' '
+        nirow=( $niface )
+        if [ "${#nirow[@]}" -gt 1 ]; then
+            for ipaddr in "${nirow[@]:1}"; do
+                servers+=( $ipaddr )
+            done
+        fi
+    done
+}
+
+show_dn_servers()
+{
+    echo "There are ${#DN_SERVERS[@]} dns entries." >&2
+    echo "They are:" >&2
+
+    local server
+    for server in "${DN_SERVERS[@]}"; do
+        echo "$server" >&2
+    done
 }
 
 
 write_dhcpd()
 {
-    local target="${1:-&1}"
+    local target="${1:-/dev/stdout}"
 
-    echo -n > "$target"
-    echo "ddns-update-style ${UPDATE_STYLE};"      >> "$target"
-    echo "default-lease-time $DEFAULT_LEASE_TIME;" >> "$target"
-    echo "max-lease-time $MAX_LEASE_TIME;"         >> "$target"
+    echo -n > $target
+    echo "ddns-update-style ${UPDATE_STYLE};"      >> $target
+    echo "default-lease-time $DEFAULT_LEASE_TIME;" >> $target
+    echo "max-lease-time $MAX_LEASE_TIME;"         >> $target
 }
 
 
+bash_clargs_process "$@"
 
 set_dn_servers
+
+write_dhcpd
+
+echo
+read -n 1 -p Press\ a\ key\ to\ view\ the\ Domain\ Name\ Servers
+echo
+show_dn_servers
