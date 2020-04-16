@@ -14,6 +14,7 @@ declare IFS=$'\n'
 declare -a CLOPTS=(
     "h|->show_usage|Show options usage"
     "l|->list_interfaces|List active network interfaces"
+    "d|->build_dns_info|Creates a DNS information report"
     "a|+>interface_addresses|Get interface DNS addresses"
 )
 IFS="$OIFS"
@@ -94,7 +95,6 @@ collect_dns_ip_addresses()
             if [[ "$line" =~ $basic_ip_regex ]]; then
                 echo -n " ${BASH_REMATCH[0]}"
             else
-                echo
                 break
             fi
         fi
@@ -109,6 +109,7 @@ collect_dnservers()
         linktest="${NETLINKS[$key]}"
         if test_for_dns_scope "$linktest"; then
             collect_dns_ip_addresses "$linktest"
+            echo
         fi
     done
 }
@@ -137,11 +138,15 @@ interface_addresses()
 {
     set_option_used
 
-    local linkinfo="${NETLINKS[$1]}"
-    if [ "$linkinfo" ]; then
-        collect_dns_ip_addresses "$linkinfo"
+    if [ "$#" -eq 0 ]; then
+        echo "The -${CUR_OPT} option requires a value."
     else
-        echo "Unknown interface name [32;1m$1[m"
+        local linkinfo="${NETLINKS[$1]}"
+        if [ "$linkinfo" ]; then
+            collect_dns_ip_addresses "$linkinfo"
+        else
+            echo "Unknown interface name [32;1m$1[m"
+        fi
     fi
 }
 
@@ -155,6 +160,23 @@ show_usage()
     echo
     echo "Otherwise, the following options are available:"
     bash_clargs_usage
+}
+
+build_dns_info()
+{
+    set_option_used
+
+    local key linktext
+    for key in "${!NETLINKS[@]}"; do
+        linktest="${NETLINKS[$key]}"
+        echo -n "$key"
+        if test_for_dns_scope "$linktest"; then
+            # Separate name from dns ip addresses
+            echo -n " "
+            collect_dns_ip_addresses "$linktest"
+        fi
+        echo
+    done
 }
 
 default_execution()
