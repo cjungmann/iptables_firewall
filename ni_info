@@ -16,6 +16,7 @@ declare -a CLOPTS=(
     "l|->list_interfaces|List active network interfaces"
     "d|->build_dns_info|Creates a DNS information report"
     "a|+>interface_addresses|Get interface DNS addresses"
+    "q|->quick_info|Quick get CSV nameservers"
 )
 IFS="$OIFS"
 
@@ -183,9 +184,36 @@ build_dns_info()
     done
 }
 
-default_execution()
+quick_info()
 {
-    echo "Doing default action"
+    local IFS=$'\n'
+    local -a lines=( $( build_dns_info ) )
+    local -a parts
+    local -a ips=()
+
+    local line addr
+    
+    IFS=$' '
+    for line in "${lines[@]}"; do
+        parts=( $line )
+        if [ "${#parts[*]}" -gt 1 ]; then
+            for addr in "${parts[@]:1}"; do
+                ips=( "${ips[@]}" $addr )
+            done
+        fi
+    done
+
+    local -i add_comma=0
+    for addr in "${ips[@]}"; do
+        if [ "$add_comma" -eq 0 ]; then
+            add_comma=1
+        else
+            echo -n ", "
+        fi
+        echo -n "$addr"
+    done
+
+    echo
 }
 
 
@@ -194,6 +222,6 @@ collect_netlinks
 
 bash_clargs_process "$@"
 if [ "$OPTION_USED" -eq 0 ]; then
-    default_execution
+    quick_info
 fi
 
