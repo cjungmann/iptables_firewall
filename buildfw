@@ -262,7 +262,7 @@ ensure_ipv4_flagged()
     fi
 }
 
-prepare_nat_rules()
+prep_nat_rules()
 {
     local -a masq_args=(
         -t nat
@@ -395,6 +395,7 @@ main()
     prep_input_table
     prep_output_table
     prep_forward_table
+    prep_nat_rules
 }
 
 
