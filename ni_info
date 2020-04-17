@@ -47,12 +47,16 @@ collect_netlinks()
 
     declare section line
     declare -a lines
+    IFS=$'\n'
     for section in "${sections[@]}"; do
-        if [[ "$section" =~ ^Link[[:space:]][[:digit:]]+[[:space:]]\(([[:alnum:]]+)\) ]]; then
-            # Replace first line of section with interface name
-            IFS=$'\n'
-            lines=( $section )
-            links["${BASH_REMATCH[1]}"]="${lines[*]:1}"
+        lines=( $section )
+        if [ "${#lines[@]}" -gt 1 ]; then
+            if [[ "$section" =~ ^Link[[:space:]][[:digit:]]+[[:space:]]\(([[:alnum:]]+)\) ]]; then
+                # Replace first line of section with interface name
+                links["${BASH_REMATCH[1]}"]="${lines[*]:1}"
+            else
+                links["${lines[@]:0:1}"]="${lines[*]:1}"
+            fi
         fi
     done
 }
