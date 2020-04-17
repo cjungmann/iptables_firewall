@@ -35,7 +35,7 @@ IFS="$OIFS"
 
 
 
-set_dn_servers()
+collect_dn_servers()
 {
     local -n servers="DN_SERVERS"
 
@@ -69,25 +69,44 @@ show_dn_servers()
     done
 }
 
+make_dns_option_line()
+{
+    echo -n "option domain-name-servers "
+
+    local ns
+    local -i add_comma=0
+    for ns in "${DN_SERVERS[@]}"; do
+        if [ "$add_comma" -eq 0 ]; then
+            add_comma=1
+        else
+            echo -n ", "
+        fi
+        echo -n "$ns"
+    done
+    echo ";"
+}
+
 
 write_dhcpd()
 {
     local target="${1:-/dev/stdout}"
 
     echo -n > $target
+
+    make_dns_option_line                           >> $target
+
+
     echo "ddns-update-style ${UPDATE_STYLE};"      >> $target
     echo "default-lease-time $DEFAULT_LEASE_TIME;" >> $target
     echo "max-lease-time $MAX_LEASE_TIME;"         >> $target
+
+    echo "authoritative;"                          >> $target
 }
 
 
 bash_clargs_process "$@"
 
-set_dn_servers
+collect_dn_servers
 
 write_dhcpd
 
-echo
-read -n 1 -p Press\ a\ key\ to\ view\ the\ Domain\ Name\ Servers
-echo
-show_dn_servers
