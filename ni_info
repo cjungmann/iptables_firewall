@@ -16,7 +16,8 @@ declare -a CLOPTS=(
     "l|->list_interfaces|List active network interfaces"
     "d|->build_dns_info|Creates a DNS information report"
     "a|+>interface_addresses|Get interface DNS addresses"
-    "q|->quick_info|Quick get CSV nameservers"
+    "c|->quick_info_comma|Quick get comma-separated nameservers"
+    "q|->quick_info|Quick get space-separated nameservers"
 )
 IFS="$OIFS"
 
@@ -184,8 +185,11 @@ build_dns_info()
     done
 }
 
-quick_info()
+quick_info_sep()
 {
+    set_option_used
+
+    local sep="${1:- }"
     local IFS=$'\n'
     local -a lines=( $( build_dns_info ) )
     local -a parts
@@ -208,7 +212,7 @@ quick_info()
         if [ "$add_comma" -eq 0 ]; then
             add_comma=1
         else
-            echo -n ", "
+            echo -n "$sep"
         fi
         echo -n "$addr"
     done
@@ -216,12 +220,15 @@ quick_info()
     echo
 }
 
+quick_info()       {  quick_info_sep; }
+quick_info_comma() {  quick_info_sep ', '; }
+
 
 collect_netlinks
 # collect_dnservers
 
 bash_clargs_process "$@"
 if [ "$OPTION_USED" -eq 0 ]; then
-    quick_info
+    quick_info_comma
 fi
 
