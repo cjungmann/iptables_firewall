@@ -5,9 +5,12 @@ declare FIELD_DELIM=$'|'
 
 source bash_clargs
 
+declare SUBNET_ADDRESS=192.168.1.0
+declare NETMASK=255.255.255.0
 declare UPDATE_STYLE=none
 declare DEFAULT_LEASE_TIME=600
 declare MAX_LEASE_TIME=7200
+declare RESERVED=32
 declare WAN_IF
 declare LAN_IF
 
@@ -21,13 +24,16 @@ declare OIFS="$IFS"
 IFS=$'\n'
 
 declare -a CLOPTS=(
-    "d|DEFAULT_LEASE_TIME|Default Lease Time"
-    "u|UPDATE_STYLE|Update style"
-    "m|MAX_LEASE_TIME|Max Lease Time"
-    "w|WAN_IF|WAN Interface"
-    "l|LAN_IF|LAN Interface"
+    "a|SUBNET_ADDRESS|Set subnet address (default $SUBNET_ADDRESS)"
+    "d|DEFAULT_LEASE_TIME|Default Lease Time (default $DEFAULT_LEASE_TIME)"
     "h|->bash_clargs_usage|Show options and meanings"
-    "s|->bash_clargs_show|Show current state of arguments."
+    "l|LAN_IF|LAN Interface (default $LAN_IF)"
+    "m|MAX_LEASE_TIME|Max Lease Time (default $MAX_LEASE_TIME)"
+    "n|NETMASK|Subnet netmask (default $NETMASK)"
+    "r|RESERVED|Highest reserved lease-significant IP address (default $RESERVED)"
+    "s|->bash_clargs_show|Show current state of arguments"
+    "u|UPDATE_STYLE|Update style (default $UPDATE_STYLE)"
+    "w|WAN_IF|WAN Interface (default $WAN_IF)"
 )
 
 IFS="$OIFS"
@@ -86,6 +92,34 @@ make_dns_option_line()
     echo ";"
 }
 
+create_subnets()
+{
+    local IFS=$'.'
+    local -a iparts=( $SUBNET_ADDRESS )
+    local -a nmparts=( $NETMASK )
+
+    if [ "$RESERVED" -gt 0 ]; then
+        local -a res_start=( "${iparts[@]:0:3}" "1" )
+        local -a res_end=( "${iparts[@]:0:3}" "$RESERVED )
+                             
+        echo "# Reserved subnet for fixed ip addresses"
+        echo "subnet $SUBNET_ADDRESS netmast $NETMASK"
+        echo "{"
+        echo "   range ${res_start[*]} ${res_end[*]};"
+        echo "   routers
+        echo "}"
+    fi
+
+
+    
+
+    echo "subnet $SUBNET_ADDRESS netmask $NETMASK"
+    echo "{"
+    echo "  range $SUBNET_ADDRESS
+    echo "}"
+
+}
+
 
 write_dhcpd()
 {
@@ -101,6 +135,8 @@ write_dhcpd()
     echo "max-lease-time $MAX_LEASE_TIME;"         >> $target
 
     echo "authoritative;"                          >> $target
+
+    
 }
 
 
