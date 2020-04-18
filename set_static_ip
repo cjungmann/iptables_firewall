@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+declare STATIC_IP=192.168.0.1/24
+declare INTERFACE=eth0
+declare NAMESERVERS=$( ./ni_info -q )
+
+declare PREPARED_BANNER="iptables_firewall static ip set"
+
+source bash_clargs
+
+declare OIFS="$IFS"
+declare IFS=$'\n'
+declare -a CLOPTS=(
+    "h|->bash_clargs_usage|Show options and meanings"
+    "i|INTERFACE|Interface name to have static ip address (default $INTERFACE)"
+    "s|STATIC_IP|Set static IP address to use (default $STATIC_IP)"
+    )
+IFS="$OIFS"
+
+is_root() { [ "$USER" = "root" ]; }
+
+check_interface_suitable()
+{
+    local INTERFACE=wlp0s20f3
+
+    local -a relinearr=(
+        ".*"
+        "${INTERFACE}"
+        "[[:space:]]+inet "
+        ".*brd "
+        "("
+        "[[:digit:]]{1,3}"
+        "(\.[[:digit:]]{1,3})"
+        ")"
+        )
+
+    local IFS=$''
+    local reline="${relinearr[*]}"
+    echo "reline = [34;1m$reline[m"
+
+    IFS=$'\n'
+    local -a lines=( $( ip -o addr ) )
+    local line
+
+    for line in "${lines[@]}"; do
+        if [[ "$line" =~ $reline ]]; then
+            IFS=$'.'
+            local -a parts=( ${BASH_REMATCH[1]} )
+            local -i part
+            for part in "${parts[@]}"; do
+                if [ "$part" -ne 255 ]; then
+                    return 1
+                fi
+            done
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+is_already_prepared()
+{
+    grep "# ${PREPARED_BANNER}" /etc/dhcpcd.conf
+}
+
+bypass_suspect_data()
+{
+    local override
+    echo "$1"
+    read -n 1 -p "Type 'y' to use anyway: " override
+    [ "$override" = 'y' ] || [ "$override" = 'Y' ]
+    local rval="$?"
+    echo
+    return $rval
+}
+
+prepare_static_address()
+{
+    local target="/etc/dhcpcd.conf"
+
+    echo                                             >> $target
+    echo "# ${PREPARED_BANNER}"                      >> $target
+    echo "interface $INTERFACE"                      >> $target
+    echo "static ip_address=${STATIC_IP}"            >> $target
+    echo "static domain_name_servers=${NAMESERVERS}" >> $target
+    echo "option routers ${STATIC_IP}"               >> $target
+}
+
+main()
+{
+    local override
+    if is_already_prepared; then
+        echo "dhcpcd.conf already prepared for a static IP address."
+    elif is_root; then
+        if check_interface_suitable; then
+            if ! bypass_suspect_data  "Interface $INTERFACE seems inappropriate."; then
+                exit 1
+            fi
+        fi
+        prepare_static_address
+    else
+        echo "Must be root to write to /etc/dhcpdcd.conf"
+    fi
+}
+
+## Begin execution
+
+bash_clargs_process "$@"
+
+if ! check_interface_suitable; then
+    if ! bypass_suspect_data  "Interface $INTERFACE using LAN broadcast address."; then
+        exit 1
+    fi
+fi
+    
+
+# main
+
+
