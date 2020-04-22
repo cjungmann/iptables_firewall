@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+
+# Collected system info
+declare -a IFACES
+declare -a DNSERVERS=()
+
+# User choices for building firewall
+declare -a EXT_IFACE
+declare -a INT_IFACE
+declare -i DHCP_IP
+
+collect_dns_servers()
+{
+    local -n dnlist='DNSERVERS'
+
+    local reip='[[:digit:]]{1,3}(\.[[:digit:]]{1,3}){3}'
+    local reline="^[[:space:]]*DNS Servers:[[:space:]](${reip})$"
+    local IFS=$'\n'
+    local -a lines=( $( resolvectl status ) )
+    local line
+    local -i saving=0
+    for line in "${lines[@]}"; do
+        if [ "$saving" -eq 0 ] && [[ "$line" =~ $reline ]]; then
+            saving=1
+            dnlist=( "${BASH_REMATCH[1]}" )
+        elif [ "$saving" -eq 1 ]; then
+            if [[ "$line" =~ ^[[:space:]]+(${reip})$ ]]; then
+                dnlist=( "${dnlist[@]}"
+                            "${BASH_REMATCH[1]}" )
+            else
+                saving=2
+            fi
+        fi
+    done
+}
+
+discern_external_iface()
+{
+    local iroute ifacename
+    if [ "${#DNSERVERS[@]}" -gt 0 ]; then
+        iroute=$( ip route get "${DNSERVERS[0]}" )
+
+        if [[ "$iroute" =~ .*\ dev\ ([[:alnum:]]+)\ src\ ([.[:digit:]]+) ]]; then
+            echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+            return 0
+        fi
+    else
+        echo "There are no DN Servers found."
+    fi
+    return 1
+}
+
+collect_interfaces()
+{
+    local IFS=$' '
+
+    # Get local handle on global IFACES:
+    local -n iflist='IFACES'
+    iflist=()
+
+    # Get external interface/ip address:
+    local ext_ni ext_ip
+    local -a ext
+    if ext=( $( discern_external_iface ) ); then
+        ext_ni="${ext[0]}"
+        ext_ip="${ext[1]}"
+    fi
+
+    # Get raw interface info
+    IFS=$'|'
+    local -a ifaces=( $( ip addr | sed -E 's/^[[:digit:]]+:/\|\0/' ) )
+
+    # Trim empty first element that precedes the initial '|'
+    ifaces=( "${ifaces[@]:1}" )
+
+    local regex_name='[[:digit:]]+: ([[:alnum:]]+):'
+    local regex_addr=' *inet ([.[:digit:]]+)'
+
+    # Filter info for global array:
+
+    local iface
+    local name addr packedarray
+    local -a subarray
+    for iface in "${ifaces[@]}"; do
+        IFS=$' '
+        subarray=()
+        name=
+        addr=
+        if [[ "$iface" =~ $regex_name ]]; then
+            name="${BASH_REMATCH[1]}"
+            subarray=( "${subarray[@]}" "$name" )
+            if [[ "$iface" =~ $regex_addr ]]; then
+                addr="${BASH_REMATCH[1]}"
+                subarray=( "${subarray[@]}" "$addr" )
+            fi
+            if [ "$name" = "$ext_ni" ] && [ "$addr" = "$ext_ip" ]; then
+               subarray=( "${subarray[@]}" "external" )
+            fi
+        fi
+        packedarray="${subarray[*]}"
+        IFS=$'\n'
+        iflist=( "${iflist[@]}" "$packedarray" )
+    done
+}
+
+
+scan_interfaces()
+{
+    local OIFS="$IFS"
+    local jfunc="$1"
+    local IFS
+    local iface
+    local -a ifarr
+    for iface in "${IFACES[@]}"; do
+        IFS=$' '
+        ifarr=( $iface )
+        IFS="$OIFS"
+        if "$jfunc" "${ifarr[@]}"; then
+            echo "$iface"
+        fi
+    done
+}
+
+get_external_iface()
+{
+    ejudge() { [ "$#" -gt 2 ] && [ "$3" = "external" ]; }
+    scan_interfaces ejudge
+}
+
+get_unassigned_iface()
+{
+    judge() { [ "$#" -eq 1 ]; }
+    scan_interfaces judge
+}
+
+
+select_interface()
+{
+    local facing="$1"
+    local -a ifaces
+
+    local IFS=$'\n'
+    if [ "$facing" = "external" ]; then
+        echo "external before internal"
+        local -n target="EXT_IFACE"
+        ifaces=( $( get_external_iface )
+                 $( get_unassigned_iface ) )
+    elif [ "$facing" = "internal" ]; then
+        echo "internal before external"
+        local -n target="INT_IFACE"
+        ifaces=( $( get_unassigned_iface )
+                 $( get_external_iface ) )
+    fi
+
+    echo "Ifaces order:"
+    echo "[36;1m${ifaces[*]}[m"
+    echo
+        
+    local -i maxindex="${#ifaces[@]}"
+    local -i index=1
+    local iface
+    local -a iparts
+    local response
+
+    IFS=$' '
+    echo "Select the $facing interface:"
+    echo
+    for iface in "${ifaces[@]}"; do
+        iparts=( $iface )
+        echo -n "${index}. ${iparts[0]}"
+        if [ "$index" -eq 1 ]; then
+            echo -n " (default)"
+        fi
+        echo
+        (( ++index ))
+    done
+
+    read -n 1 -p "Type a number, or press ENTER for default. " response
+    if [ $? -eq 0 ]; then
+        if [ "${#response}" -eq 0 ]; then
+            response=1
+        else
+            echo
+            if [ "$response" -lt 1 ] && [ "$response" -gt "$maxindex" ]; then
+                echo "Error, unknown interface selected." >&2
+                exit 1
+            fi
+        fi
+        target=( ${ifaces[$(( response-1 ))]} )
+    fi
+}
+
+
+collect_dns_servers
+collect_interfaces
+
+echo
+echo "Showing externals $( get_external_iface )"
+echo
+echo "Showing unassigned $( get_unassigned_iface )"
+echo
+
+
+select_interface "external"
+select_interface "internal"
+
+echo "EXT_IFACE [32;1m${EXT_IFACE[*]}[m"
+echo "INT_IFACE [32;1m${INT_IFACE[*]}[m"
+
+
