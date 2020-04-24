@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# Collected system info
+declare -a IFACES
+declare -a DNSERVERS=()
+
+nif_collect_dns_servers()
+{
+    local -n dnlist='DNSERVERS'
+
+    local reip='[[:digit:]]{1,3}(\.[[:digit:]]{1,3}){3}'
+    local reline="^[[:space:]]*DNS Servers:[[:space:]](${reip})$"
+    local IFS=$'\n'
+    local -a lines=( $( resolvectl status ) )
+    local line
+    local -i saving=0
+    for line in "${lines[@]}"; do
+        if [ "$saving" -eq 0 ] && [[ "$line" =~ $reline ]]; then
+            saving=1
+            dnlist=( "${BASH_REMATCH[1]}" )
+        elif [ "$saving" -eq 1 ]; then
+            if [[ "$line" =~ ^[[:space:]]+(${reip})$ ]]; then
+                dnlist=( "${dnlist[@]}"
+                            "${BASH_REMATCH[1]}" )
+            else
+                saving=2
+            fi
+        fi
+    done
+}
+
+nif_discern_external_iface()
+{
+    local iroute ifacename
+    if [ "${#DNSERVERS[@]}" -gt 0 ]; then
+        iroute=$( ip route get "${DNSERVERS[0]}" )
+
+        if [[ "$iroute" =~ .*\ dev\ ([[:alnum:]]+)\ src\ ([.[:digit:]]+) ]]; then
+            echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+            return 0
+        fi
+    else
+        echo "There are no DN Servers found."
+    fi
+    return 1
+}
+
+nif_collect_interfaces()
+{
+    local IFS=$' '
+
+    # Get local handle on global IFACES:
+    local -n iflist='IFACES'
+    iflist=()
+
+    # Get external interface/ip address:
+    local ext_ni ext_ip
+    local -a ext
+    if ext=( $( nif_discern_external_iface ) ); then
+        ext_ni="${ext[0]}"
+        ext_ip="${ext[1]}"
+    fi
+
+    # Get raw interface info
+    IFS=$'|'
+    local -a ifaces=( $( ip addr | sed -E 's/^[[:digit:]]+:/\|\0/' ) )
+
+    # Trim empty first element that precedes the initial '|'
+    ifaces=( "${ifaces[@]:1}" )
+
+    local regex_name='[[:digit:]]+: ([[:alnum:]]+):'
+    local regex_addr=' *inet ([.[:digit:]]+)'
+
+    # Filter info for global array:
+
+    local iface
+    local name addr packedarray
+    local -a subarray
+    for iface in "${ifaces[@]}"; do
+        IFS=$' '
+        subarray=()
+        name=
+        addr=
+        if [[ "$iface" =~ $regex_name ]]; then
+            name="${BASH_REMATCH[1]}"
+            subarray=( "${subarray[@]}" "$name" )
+            if [[ "$iface" =~ $regex_addr ]]; then
+                addr="${BASH_REMATCH[1]}"
+                subarray=( "${subarray[@]}" "$addr" )
+            fi
+            if [ "$name" = "$ext_ni" ] && [ "$addr" = "$ext_ip" ]; then
+               subarray=( "${subarray[@]}" "external" )
+            fi
+        fi
+        packedarray="${subarray[*]}"
+        IFS=$'\n'
+        iflist=( "${iflist[@]}" "$packedarray" )
+    done
+}
+
+nif_is_external()
+{
+    local -a parts=( $1 )
+    [ "${#parts}" -gt 2 ] && [ "${parts[2]}" = "external" ]
+}
+
+nif_get_name()
+{
+    local -a parts=( $1 )
+    echo "${parts[0]}" 
+}
+
+nif_get_addr()
+{
+    local -a parts=( $1 )
+    if [ "${#parts[0]}" -gt 1 ]; then
+        echo "${parts[1]}"
+        return 0
+    fi
+
+    return 1
+}
+
+
+
+
+nif_collect_dns_servers
+nif_collect_interfaces
+

@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+
+# This script file collects network information
+source nif_info
+
+declare IF_EXT
+declare IF_INT
+declare INT_NET=192.168.10.0
+
+clear_screen() { echo -n "[2J"; }
+
+set_network_defaults()
+{
+    local iface
+    local name
+    for iface in "${IFACES[@]}"; do
+        name=$( nif_get_name "$iface" )
+        if nif_is_external "$iface"; then
+            IF_EXT=$name
+        else
+            IF_INT=$name
+        fi
+
+        if [ "$IF_EXT" ] && [ "$IF_INT" ]; then
+            break
+        fi
+    done
+}
+
+get_ip4_address()
+{
+    local -n ret_val="$1"
+    local IFS=$'.'
+    local -a aparts=( $2 )
+
+    local hilite="[32;1m"
+    local unlite="[m"
+
+    local -i position=0
+    local -i index
+    local part
+    local -i curpart
+    local resp
+
+    while true; do
+        clear_screen
+        # Print IP address with current spot highlighted:
+        index=0
+        for part in "${aparts[@]}"; do
+            if [ "$index" -gt 0 ]; then
+                echo -n '.'
+            fi
+            if [ "$index" -eq "$position" ]; then
+                echo -n "$hilite"
+            fi
+            echo -n "${part}${unlite}"
+            (( ++index ))
+        done
+        echo
+
+        read -n 1 -p "Type a number to set, period to switch, s to save, q to quit. " resp
+        echo
+        case "$resp" in
+            [0-9] )
+                curpart="${curpart}${resp}" ;;
+            s )
+                IFS=$'.'
+                ret_val="${aparts[*]}"
+                return 0 ;;
+            q )
+                return 1 ;;
+        esac
+    done
+}
+
+get_iface_name_index()
+{
+    local curname="$1"
+
+    local -i index=0
+    local name
+
+    local iface
+    for iface in "${IFACES[@]}"; do
+        name=$( nif_get_name "${IFACES[$index]}" )
+        if [ "$curname" = "$name" ]; then
+            echo "$index"
+            return 0
+        fi
+        (( ++index ))
+    done
+    return 1
+}
+
+show_interface_choices()
+{
+    local curchoice=$( nif_get_name "$1" )
+    local direction="$2"
+    local namecol="[1;4m"
+    local defcol="[m"
+    local curcol
+
+    local iface
+    local name
+    local addr
+    local index=1
+
+    clear_screen
+    echo "curchoice is [33;1m$curchoice[m and direction is [33;1m$direction[m"
+    echo "Select a device for the [36;1m$direction[m interface."
+    echo "The ${namecol}current selection${defcol} is highlighted."
+    echo
+
+    for iface in "${IFACES[@]}"; do
+        name=$( nif_get_name "$iface" )
+        addr=$( nif_get_addr "$iface" )
+        if [ $? -ne 0 ]; then
+            addr="NA"
+        fi
+
+        echo -n "name is [33;1m$name[m  "
+
+        if [ "$name" = "$curchoice" ]; then
+            curcol="$namecol"
+        else
+            curcol="$defcol"
+        fi
+
+        echo "$index. ${curcol}$name${defcol} ($addr)"
+        (( ++index ))
+    done
+
+}
+
+select_interface()
+{
+    local -n ret_val="$1"
+    ret_val=
+
+    local name_iface="$2"
+    local type_iface="$3"
+    local resp
+    local -i max_index="${#IFACES[@]}"
+    local -i cur_index=$( get_iface_name_index "$name_iface" )
+    local -i sel_index
+
+    while true; do
+        show_interface_choices "$name_iface" "$type_iface"
+        echo "q. to keep current choice"
+        echo
+        read -n 1 -p "Select an interface: " resp
+        echo
+
+        case "$resp" in
+            [1-9] )
+                sel_index=$(( $resp - 1 ))
+                if [ "$sel_index" -lt "$max_index" ]; then
+                    ret_val=$( nif_get_name "${IFACES[$sel_index]}" )
+                    return 0
+                fi
+                ;;
+            q ) break ;;
+        esac
+    done
+
+    return 1
+}
+
+show_network_defaults()
+{
+    clear_screen
+    echo "1. IF_EXT is [33;1m$IF_EXT[m"
+    echo "2. IF_INT is [33;1m$IF_INT[m"
+    echo "3. INT_NET is [33;1m$INT_NET[m"
+}
+
+confirm_network_defaults()
+{
+    local -n if_ext="IF_EXT"
+    local -n if_int="IF_INT"
+    local -n int_net="INT_NET"
+    local resp
+    local new_iface
+    local new_address
+    while true; do
+        show_network_defaults
+        echo "q. to accept defaults"
+        echo 
+        read -n 1 -p "Type a number " resp
+        echo
+        case "$resp" in
+            1 )
+                if select_interface new_iface "$if_ext" "external"; then
+                    if_ext="$new_iface"
+                fi ;;
+            2 )
+                if select_interface new_iface "$if_int" "internal"; then
+                    if_int="$new_iface"
+                fi ;;
+            3 ) if get_ip4_address new_address "$int_net"; then
+                    int_net=$new_address
+                fi ;;
+            q ) break ;;
+            * ) echo "Unknown entry.  Try again." ;;
+        esac
+    done
+}
+
+
+set_network_defaults
+
+confirm_network_defaults
+
+
