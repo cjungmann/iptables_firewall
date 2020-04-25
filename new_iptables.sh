@@ -115,7 +115,11 @@ prepare_iptables()
     $IPTABLES -A FORWARD -i $ETH_INT ! -s $INT_NET -j DROP
 
 
+
+    #######################
     ###### NAT Rules ######
+    #######################
+    
     # Make the firewall look like it's the outside/internet:
     $IPTABLES -t nat -A POSTROUTING -s $INT_NET -o $ETH_OUT -j MASQUERADE
 
