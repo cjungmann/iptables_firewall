@@ -122,7 +122,31 @@ nif_get_addr()
 }
 
 
+nif_find_external_name()
+{
+    local iface
+    for iface in "${IFACES[@]}"; do
+        if nif_is_external "$iface"; then
+            nif_get_name "$iface"
+            return 0
+        fi
+    done
 
+    return 1
+}
+
+nif_find_first_internal_name()
+{
+    local iface
+    for iface in "${IFACES[@]}"; do
+        if nif_is_external "$iface"; then
+            nif_get_name "$iface"
+            return 0
+        fi
+    done
+
+    return 1
+    }
 
 nif_collect_dns_servers
 nif_collect_interfaces
