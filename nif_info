@@ -163,6 +163,18 @@ nif_find_first_internal_name()
     return 1
 }
 
+nif_confirm_resolv_ctl_available()
+{
+    resolvectl system > /dev/null
+    if [ "$?" -ne 0 ]; then
+        echo "The reolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'"
+        exit 1
+    fi
+}
+
+nif_confirm_resolv_ctl_available
+
+
 nif_collect_dns_servers
 nif_collect_interfaces
 
