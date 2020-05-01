@@ -106,11 +106,20 @@ nif_is_external()
 
 nif_is_internal()
 {
+    # parts is an 'iface' value, an array with the interface name, ip address, etc.
     local -a parts=( $1 )
+    local -i octet
+    local IFS=$'.'
+    
     if [ "${#parts[@]}" -eq 2 ]; then
         local -a addr=( ${parts[1]} )
-        if [ "${addr[0]}" -ne 127 ]; then
-            return 0
+        if [ "${#addr[@]}" -eq 4 ]; then
+            octet="${addr[0]}";
+            if [ "$octet" -ne 127 ]; then
+                return 0
+            fi
+        else
+            echo "The ip address,'${parts[1]}', doesn't seem to be an IP address"
         fi
     elif [ "${#parts[@]}" -eq 1 ]; then
         return 0
@@ -167,12 +176,12 @@ nif_confirm_resolv_ctl_available()
 {
     resolvectl system > /dev/null
     if [ "$?" -ne 0 ]; then
-        echo "The reolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'"
+        echo "The resolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'"
         exit 1
     fi
 }
 
-nif_confirm_resolv_ctl_available
+# nif_confirm_resolv_ctl_available
 
 
 nif_collect_dns_servers
