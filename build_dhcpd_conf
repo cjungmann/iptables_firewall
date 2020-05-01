@@ -4,17 +4,17 @@ declare ROW_DELIM=$'\n'
 declare FIELD_DELIM=$'|'
 
 source bash_clargs
+source nif_info
 
 declare SUBNET_ADDRESS=192.168.1.0
+declare BROADCAST_OCTET=1
 declare NETMASK=255.255.255.0
 declare UPDATE_STYLE=none
 declare DEFAULT_LEASE_TIME=600
 declare MAX_LEASE_TIME=7200
 declare RESERVED=32
-declare WAN_IF
-declare LAN_IF
-
-declare -a DN_SERVERS
+declare WAN_IF=$( nif_find_external_name )
+declare LAN_IF=$( nif_find_first_internal_name )
 
 # This DHCP server also serves as the NAT server, so the
 # IP address of LAN_IFACE will be the 'router' value.
@@ -24,53 +24,29 @@ declare OIFS="$IFS"
 IFS=$'\n'
 
 declare -a CLOPTS=(
-    "a|SUBNET_ADDRESS|Set subnet address (default $SUBNET_ADDRESS)"
-    "d|DEFAULT_LEASE_TIME|Default Lease Time (default $DEFAULT_LEASE_TIME)"
+    "a|SUBNET_ADDRESS|Set subnet address"
+    "b|BROADCAST_OCTET|Value to use for the final octet of the broadcast address"
+    "d|DEFAULT_LEASE_TIME|Default Lease Time"
     "h|->bash_clargs_usage|Show options and meanings"
-    "l|LAN_IF|LAN Interface (default $LAN_IF)"
-    "m|MAX_LEASE_TIME|Max Lease Time (default $MAX_LEASE_TIME)"
-    "n|NETMASK|Subnet netmask (default $NETMASK)"
-    "r|RESERVED|Highest reserved lease-significant IP address (default $RESERVED)"
+    "l|LAN_IF|LAN Interface"
+    "m|MAX_LEASE_TIME|Max Lease Time"
+    "n|NETMASK|Subnet netmask"
+    "r|RESERVED|Highest reserved least-significant IP address"
     "s|->bash_clargs_show|Show current state of arguments"
-    "u|UPDATE_STYLE|Update style (default $UPDATE_STYLE)"
-    "w|WAN_IF|WAN Interface (default $WAN_IF)"
+    "u|UPDATE_STYLE|Update style"
+    "w|WAN_IF|WAN Interface"
 )
 
 IFS="$OIFS"
 
 
-
-
-collect_dn_servers()
-{
-    local -n servers="DN_SERVERS"
-
-    local IFS=$'\n'
-    local -a nifaces
-    nifaces=( $( ./ni_info -d ) )
-
-    local niface
-    local -a nirow
-    local ipaddr
-
-    for niface in "${nifaces[@]}"; do
-        IFS=' '
-        nirow=( $niface )
-        if [ "${#nirow[@]}" -gt 1 ]; then
-            for ipaddr in "${nirow[@]:1}"; do
-                servers+=( $ipaddr )
-            done
-        fi
-    done
-}
-
 show_dn_servers()
 {
-    echo "There are ${#DN_SERVERS[@]} dns entries." >&2
+    echo "There are ${#DNSERVERS[@]} dns entries." >&2
     echo "They are:" >&2
 
     local server
-    for server in "${DN_SERVERS[@]}"; do
+    for server in "${DNSERVERS[@]}"; do
         echo "$server" >&2
     done
 }
@@ -81,7 +57,7 @@ make_dns_option_line()
 
     local ns
     local -i add_comma=0
-    for ns in "${DN_SERVERS[@]}"; do
+    for ns in "${DNSERVERS[@]}"; do
         if [ "$add_comma" -eq 0 ]; then
             add_comma=1
         else
@@ -92,32 +68,32 @@ make_dns_option_line()
     echo ";"
 }
 
-create_subnets()
+make_broadcast_address()
+{
+    local IFS=$'.'
+    local -a iparts=( $SUBNET_ADDRESS )
+    iparts[3]="$BROADCAST_OCTET"
+    echo "${iparts[*]}"
+}
+
+create_basic_subnet()
 {
     local IFS=$'.'
     local -a iparts=( $SUBNET_ADDRESS )
     local -a nmparts=( $NETMASK )
+    local -a router=$( make_broadcast_address )
 
     if [ "$RESERVED" -gt 0 ]; then
         local -a res_start=( "${iparts[@]:0:3}" "1" )
-        local -a res_end=( "${iparts[@]:0:3}" "$RESERVED )
+        local -a res_end=( "${iparts[@]:0:3}" "$RESERVED" )
                              
         echo "# Reserved subnet for fixed ip addresses"
-        echo "subnet $SUBNET_ADDRESS netmast $NETMASK"
+        echo "subnet $SUBNET_ADDRESS netmask $NETMASK"
         echo "{"
         echo "   range ${res_start[*]} ${res_end[*]};"
-        echo "   routers
+        echo "   option routers $router;"
         echo "}"
     fi
-
-
-    
-
-    echo "subnet $SUBNET_ADDRESS netmask $NETMASK"
-    echo "{"
-    echo "  range $SUBNET_ADDRESS
-    echo "}"
-
 }
 
 
@@ -129,20 +105,20 @@ write_dhcpd()
 
     make_dns_option_line                           >> $target
 
-
     echo "ddns-update-style ${UPDATE_STYLE};"      >> $target
     echo "default-lease-time $DEFAULT_LEASE_TIME;" >> $target
     echo "max-lease-time $MAX_LEASE_TIME;"         >> $target
 
     echo "authoritative;"                          >> $target
 
+    create_basic_subnet
+
+
     
 }
 
 
 bash_clargs_process "$@"
-
-collect_dn_servers
 
 write_dhcpd
 
