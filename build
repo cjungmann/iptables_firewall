@@ -314,7 +314,7 @@ if is_write_mode; then
     if is_root; then
         echo "About to write firewall script dhcpd.conf"
         generate_dhcpd "/etc/dhcp/dhcpd.conf"
-        service isc-dhcpd-server restart
+        service isc-dhcp-server restart
     else
         echo "Must be root to write scripts."
     fi
