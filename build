@@ -237,7 +237,9 @@ backup_script()
 {
     local target="$1"
     if [ -f "$target" ]; then
-        echo mv "$target" "$target.$( make_date_suffix)"
+        local new_target="$target.$( make_date_suffix )"
+        echo "Saving [32;1m$target[m to [32;1m$new_target[m"
+        # mv "$target" "$new_target"
     fi
 }
 
