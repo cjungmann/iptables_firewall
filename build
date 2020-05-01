@@ -256,7 +256,7 @@ generate_dhcpd()
 
     if is_write_mode; then
         backup_script "$target"
-        # ./build_dhcpd_conf > "$target"
+        ./build_dhcpd_conf > "$target"
     else
         echo
         echo "[33;1m$target[m:"
@@ -314,6 +314,7 @@ if is_write_mode; then
     if is_root; then
         echo "About to write firewall script dhcpd.conf"
         generate_dhcpd "/etc/dhcp/dhcpd.conf"
+        service isc-dhcpd-server restart
     else
         echo "Must be root to write scripts."
     fi
