@@ -1,13 +1,54 @@
 #!/usr/bin/env bash
 
+# For commandline processing
+
+declare -a CLOPTS=(
+    "h|->bash_clargs_usage|Show help"
+    "e|IF_EXT|Set external interface name"
+    "i|IF_INT|Set internal interface name"
+    "n|INT_NET|Set internal internet base address"
+    "s|-SKIP_INTERACTIVE|Skip setting parameters interactively."
+    "w|-WRITE_CONFIGS|Write configuration files.  Must be root."
+)
+
+source bash_clargs
+
+
 # This script file collects network information
 source nif_info
 
 declare IF_EXT
 declare IF_INT
 declare INT_NET=192.168.10.0
+declare -i SKIP_INTERACTIVE=0
+declare -i WRITE_CONFIGS=0
 
 clear_screen() { echo -n "[2J"; }
+is_root() { [ "$USER" = "root" ]; }
+
+get_keypress()
+{
+    local prompt="${1:=Press any key}"
+
+    local IFS=''
+
+    # Array to collect chars in case of multi-char keypress
+    local -a chars=( )
+    
+    # Wait for a keypress (-n 1), save to array
+    local keychar
+    read -n 1 -s -p "${prompt}" keychar
+    chars=( "$keychar" )
+
+    # Collect additional characters if available, especially for escape characters
+    while read -t 0; do
+        read -n 1 keychar
+        chars=( "${chars[@]}" "$keychar" )
+    done
+
+    # empty IFS so array is joined without delimiters
+    echo "${chars[*]}"
+}
 
 set_network_defaults()
 {
@@ -42,8 +83,12 @@ get_ip4_address()
     local -i curpart
     local resp
 
+    # Do not leave IFS='.' or periods will be invisible to the 'read' command
+    IFS=''
+
     while true; do
         clear_screen
+
         # Print IP address with current spot highlighted:
         index=0
         for part in "${aparts[@]}"; do
@@ -58,18 +103,30 @@ get_ip4_address()
         done
         echo
 
-        read -n 1 -p "Type a number to set, period to switch, s to save, q to quit. " resp
-        echo
-        case "$resp" in
-            [0-9] )
-                curpart="${curpart}${resp}" ;;
-            s )
-                IFS=$'.'
-                ret_val="${aparts[*]}"
-                return 0 ;;
-            q )
-                return 1 ;;
-        esac
+        curpart="${aparts[$position]}"
+
+        resp=$( get_keypress "Type a number to set, period to advance, s to save, q to quit. ")
+        # read -n 1 -r -p "Type a number to set, period to switch, s to save, q to quit. " resp
+        echo 
+        echo "resp has ${#resp} characters, is $resp"
+        if [[ "$resp" =~ [0-9] ]]; then
+            curpart="${curpart}${resp}"
+            aparts[$position]="$curpart"
+        elif [ "$resp" = '.' ]; then
+            (( ++position ))
+        elif [ "$resp" = 's' ]; then
+            IFS=$'.'
+            ret_val="${aparts[*]}"
+            return 0
+        elif [ "$resp" = 'q' ]; then
+            return 1
+        elif [ "${#resp}" -eq 1 ]; then
+            printf "The single character is %d." "'$resp"
+            read -n1
+        else
+            echo "resp is ${#resp} characters long: $resp"
+            read -n1
+        fi
     done
 }
 
@@ -174,6 +231,37 @@ show_network_defaults()
     echo "3. INT_NET is [33;1m$INT_NET[m"
 }
 
+make_date_suffix() { date +%Y%m%d.%H%M%S; }
+
+backup_script()
+{
+    local target="$1"
+    if [ -f "$target" ]; then
+        echo mv "$target" "$target.$( make_date_suffix)"
+    fi
+}
+
+generate_dhcpd()
+{
+    local -a args=(
+        -a "$INT_NET"
+        -l "$IF_INT"
+        -w "$IF_EXT"
+    )
+
+    local target="$1"
+
+    if [ "$WRITE_CONFIGS" -eq 1 ]; then
+        backup_script "$target"
+        # ./build_dhcpd_conf > "$target"
+    else
+        echo
+        echo "[33;1m$target[m:"
+        ./build_dhcpd_conf
+        echo
+    fi
+}
+
 confirm_network_defaults()
 {
     local -n if_ext="IF_EXT"
@@ -184,7 +272,8 @@ confirm_network_defaults()
     local new_address
     while true; do
         show_network_defaults
-        echo "q. to accept defaults"
+        echo "a. to accept defaults"
+        echo "q. to quit"
         echo 
         read -n 1 -p "Type a number " resp
         echo
@@ -200,7 +289,8 @@ confirm_network_defaults()
             3 ) if get_ip4_address new_address "$int_net"; then
                     int_net=$new_address
                 fi ;;
-            q ) break ;;
+            a ) break ;;
+            q ) exit 0 ;;
             * ) echo "Unknown entry.  Try again." ;;
         esac
     done
@@ -209,6 +299,21 @@ confirm_network_defaults()
 
 set_network_defaults
 
-confirm_network_defaults
+bash_clargs_process "$@"
 
+bash_clargs_show
+
+if [ "${SKIP_INTERACTIVE}" -eq 0 ]; then
+    confirm_network_defaults
+fi
+
+if [ "$WRITE_CONFIGS" -eq 1 ]; then
+    if is_root; then
+        generate_dhcpd "/etc/dhcpd.conf"
+    else
+        echo "Must be root to write scripts."
+    fi
+else
+    generate_dhcpd "/etc/dhcpd.conf"
+fi
 
