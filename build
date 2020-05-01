@@ -25,6 +25,7 @@ declare -i WRITE_CONFIGS=0
 
 clear_screen() { echo -n "[2J"; }
 is_root() { [ "$USER" = "root" ]; }
+is_write_mode() { [ "$WRITE_CONFIGS" -eq 1 ]; }
 
 get_keypress()
 {
@@ -253,7 +254,7 @@ generate_dhcpd()
 
     local target="$1"
 
-    if [ "$WRITE_CONFIGS" -eq 1 ]; then
+    if is_write_mode; then
         backup_script "$target"
         # ./build_dhcpd_conf > "$target"
     else
@@ -309,13 +310,14 @@ if [ "${SKIP_INTERACTIVE}" -eq 0 ]; then
     confirm_network_defaults
 fi
 
-if [ "$WRITE_CONFIGS" -eq 1 ]; then
+if is_write_mode; then
     if is_root; then
-        generate_dhcpd "/etc/dhcpd.conf"
+        echo "About to write firewall script dhcpd.conf"
+        generate_dhcpd "/etc/dhcp/dhcpd.conf"
     else
         echo "Must be root to write scripts."
     fi
 else
-    generate_dhcpd "/etc/dhcpd.conf"
+    generate_dhcpd "/etc/dhcp/dhcpd.conf"
 fi
 
