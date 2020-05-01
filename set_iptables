@@ -13,9 +13,13 @@
 # can be done by invoking ./reset_tables.
 #######################################################
 
+source bash_clargs
+
+
 declare INT_NET=
 declare E_EXT=
 declare E_INT=
+declare SAVE_AT_END=0
 
 declare -a Base_TCP_Accept_Args
 
@@ -119,7 +123,7 @@ identify_interfaces()
 }
 
 # Flush iptables and add basic rules
-prep_iptables()
+flush_iptables()
 {
     # Flush existing rules:
     iptables -F         # Flush (remove all rules) for all tables
@@ -262,8 +266,28 @@ ensure_ipv4_flagged()
     fi
 }
 
+add_incoming_nat_rule()
+{
+    local daddress="$1"
+    local -i dport="$2"
+    local -i tport="${3:-$dport}"
+
+    local -a nat_redir_args=(
+        -t nat
+        -A PREROUTING
+        -p tcp
+        --dport "$dport"
+        -i "$E_EXT"
+        -j DNAT
+        --to "${daddress}:${tport}"
+    )
+
+    iptables "${nat_redir_args[@]}" 
+}
+
 prep_nat_rules()
 {
+    # For LAN traffic going out to WAN:
     local -a masq_args=(
         -t nat
         -A POSTROUTING
@@ -272,18 +296,9 @@ prep_nat_rules()
         -j MASQUERADE
     )
 
-    local -a redir_args=(
-        -t nat
-        -A PREROUTING
-        -p tcp
-        --dport 80
-        -i "$E_EXT"
-        -j DNAT
-        --to "${lamphost}:80"
-    )
-
-    iptables "${masq_args[@]}"
-    iptables "${redir_args[@]}"
+    iptables "${masq_args[@]}" 
+    add_incoming_nat_rule "${lamphost}" 80   # HTTP
+    # add_incoming_nat_rule "${lamphost}" 21   # FTP
 
     ensure_ipv4_flagged "ip_forward"
     ensure_ipv4_flagged "ip_dynaddr"
@@ -385,12 +400,7 @@ main()
     )
 
     
-    if ! is_root; then
-        echo "You must be root to run this script." >&2
-        exit
-    fi
-
-    prep_iptables
+    flush_iptables
 
     prep_input_table
     prep_output_table
@@ -401,5 +411,24 @@ main()
 
 # test_remove_array_option
 
+declare -a CLOPTS=(
+    "h|->bash_clargs_usage|Show options usage"
+    "e|E_EXT|Set external interface name"
+    "i|E_INT|Set internal interface name"
+    "s|-SAVE_AT_END|Flag to preserve new rules (ie not reset to simple at completion)"
+)
+
+bash_clargs_process "$@"
+
+if ! is_root; then
+    echo "You must be root to run this script." >&2
+    exit
+fi
+
 main
 iptables-save
+
+if [ "$SAVE_AT_END" -eq 0 ]; then
+    echo "Resetting IPTables to simplest form"
+    ./reset_tables
+fi
