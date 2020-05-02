@@ -99,17 +99,14 @@ create_basic_subnet()
 
 write_dhcpd()
 {
-    local target="${1:-/dev/stdout}"
+    make_dns_option_line
 
-    echo -n > $target
-
-    make_dns_option_line                           >> $target
-
-    echo "ddns-update-style ${UPDATE_STYLE};"      >> $target
-    echo "default-lease-time $DEFAULT_LEASE_TIME;" >> $target
-    echo "max-lease-time $MAX_LEASE_TIME;"         >> $target
-
-    echo "authoritative;"                          >> $target
+    echo "ddns-update-style ${UPDATE_STYLE};"
+    echo "default-lease-time $DEFAULT_LEASE_TIME;"
+    echo "max-lease-time $MAX_LEASE_TIME;"
+    echo
+    echo "authoritative;"
+    echo
 
     create_basic_subnet
 
