@@ -265,6 +265,18 @@ generate_dhcpd()
     fi
 }
 
+update_default_isc_dhcp_server()
+{
+    local iface="$IF_INT"
+
+    local -a sargs=(
+        -e 's/\(INTERFACESv4=\"\).*/\1'"$1"'\"/'
+        -e 's/#\(DHCPDv4.*\)/\1/'
+    )
+
+    sed -i "${sargs[@]}" /etc/default/isc-dhcp-server
+}
+
 confirm_network_defaults()
 {
     local -n if_ext="IF_EXT"
@@ -312,8 +324,11 @@ fi
 
 if is_write_mode; then
     if is_root; then
-        echo "About to write firewall script dhcpd.conf"
+        echo "About to write dhcp server configuration files."
         generate_dhcpd "/etc/dhcp/dhcpd.conf"
+        update_default_isc_dhcp_server
+
+        echo "Starting isc-dhcp-server"
         service isc-dhcp-server restart
     else
         echo "Must be root to write scripts."
