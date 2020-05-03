@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+
+source nif_info
+
+declare ETH_INT=$( nif_find_external_name )
+declare ETH_EXT=$( nif_find_first_internal_name )
+declare INT_NET=192.168.0.0/24
+
+source bash_clargs
+
+declare -a CLOPTS=(
+    "h|->bash_clargs_usage|Show options"
+    "i|ETH_INT|Set internal interface name"
+    "e|ETH_EXT|Set external interface name"
+    "n|INT_NET|Set LAN IP Address range"
+)
+
+# The starting point for this version of an iptables-generating script
+# (broke super-long URL into an array to keep shorter lines).
+open_inspiration_page()
+{
+    local -a uparts=(
+        "https://"
+        "www.digitalocean.com/"
+        "community/"
+        "tutorials/"
+        "how-to-implement-a-basic-"
+        "firewall-template-with-"
+        "iptables-on-ubuntu-14-04"
+    )
+
+    local IFS=$''
+    browse "${uparts[*]}" &
+}
+
+declare MPR=/sbin/modprobe
+declare IPT=/sbin/iptables
+
+is_root() { [ "$USER" = "root" ]; }
+
+ipt_debug()
+{
+    local IFS=$' '
+    /sbin/iptables "${@:1}"
+    if [ "$?" -ne 0 ]; then
+        echo "[31;1mIPTABLES failure[m with arguments [33;1m${*:1}[m"
+    fi
+}
+
+# optional parameter to set DROP (default) or ACCEPT
+ipt_flush()
+{
+    local policy="${1:-DROP}"
+
+    $IPT -F           # Delete all chain rules
+    $IPT -F -t nat
+    $IPT -F -t raw
+
+    $IPT -X           # Delete non-built-in chains
+
+    # Set policies to DROP if not explicitely accepted
+    $IPT -P INPUT DROP
+    $IPT -P OUTPUT DROP
+    $IPT -P FORWARD DROP
+
+    # Use connection tracking modules
+    $MPR nf_conntrack
+    $MPR iptable_nat
+    $MPR ipt_iprange
+}
+
+ipt_protocol_table()
+{
+    local table="$1"
+    local -a args=(
+        -A INPUT
+        -p "${table,,}"
+    )
+
+    if [ "${table,,}" = "tcp" ]; then
+        args=( "${args[@]}" --syn )
+    fi
+
+    args=(
+        "${args[@]}"
+        -m conntrack
+        --ctstate NEW
+        -j "${table^^}"
+    )
+    
+    $IPT -N "${table^^}"
+    $IPT "${args[@]}"
+}
+
+ipt_prepare_custom_tables()
+{
+    ipt_protocol_table "tcp"
+    ipt_protocol_table "udp"
+    ipt_protocol_table "icmp"
+}
+
+ipt_generic_input_rules()
+{
+    # Accepting packets by port
+    $IPT -A INPUT -p tcp --dport 22 -i $ETH_INT -j ACCEPT
+
+    # Accepting packets by interface
+    $IPT -A INPUT -i lo -j ACCEPT
+
+    # Accept packets from established connections
+    $IPT -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    $IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Drop invalid packets
+    $IPT -A INPUT -m state --state INVALID -j DROP
+}
+
+ipt_permissive_forward_rules()
+{
+    $IPT -A FORWARD -i $ETH_EXT -o $ETH_INT -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+    # Allow everything out:
+    $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -j ACCEPT
+
+    # Fall out to default DROP polify
+}
+
+ipt_add_nat_forward_out_rule()
+{
+    local IFS=$' '
+    local -a aport=( $1 )
+    local -a protos=()
+
+    local proto port
+
+    # Break down line, save port and protocols, skip all following a '#'
+    for proto in "${aport[@]}"; do
+        if [ "${proto:0:1}" = '#' ]; then
+            break
+        elif [ -z $port ]; then
+            port=$proto
+        else
+            protos=( "${protos[@]}" $proto )
+        fi
+    done
+
+    # Unspecified protocol, use tcp
+    if [ "${#protos[@]}" -eq 0 ]; then
+        protos=( tcp )
+    fi
+
+    for proto in "${protos[@]}"; do
+        $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -p $proto --dport $port -j ACCEPT
+    done
+}
+
+ipt_restrictive_forward_rules()
+{
+    $IPT -A FORWARD -i $ETH_EXT -o $ETH_INT -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+    if [ -f ipt_forward_allowed ]; then
+        local IFS=$'\n'
+        local -a ports=( $( cat ipt_forward_allowed ) )
+        local -a aport
+        for port in "${ports[@]}"; do
+            ipt_add_nat_forward_out_rule $port
+        done
+    fi
+
+    # Fall out to default DROP polify
+}
+
+
+ipt_nat_rules()
+{
+    $IPT -t nat -A POSTROUTING -s "$INT_NET" -o "$ETH_EXT" -j MASQUERADE
+
+    # enable ip forwarding and dynamic addressing:
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    echo 1 > /proc/sys/net/ipv4/ip_dynaddr
+}
+
+
+main()
+{
+    ipt_flush
+    ipt_generic_input_rules
+    ipt_prepare_custom_tables
+
+    ipt_restrictive_forward_rules
+
+    ipt_nat_rules
+}
+
+bash_clargs_process "$@"
+
+if is_root; then
+    IPT="ipt_debug"
+    main
+    echo "[32;1m"
+    iptables-save
+    echo "[m"
+
+    ipt_flush "ACCEPT"
+else
+    echo "Must be root to run."
+fi
