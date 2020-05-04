@@ -111,8 +111,10 @@ ipt_generic_tables_rules()
     # accept established
     $IPT -A $table -m state --state ESTABLISHED,RELATED -j ACCEPT
     
-    # drop spoofedn (from LAN interface without LAN address)
-    $IPT -A $table -i $ETH_INT ! -s $INT_NET -j DROP
+    if [ "$table" != "OUTPUT" ]; then
+        # drop spoofedn (from LAN interface without LAN address)
+        $IPT -A $table -i $ETH_INT ! -s $INT_NET -j DROP
+    fi
 
     $IPT -A $table -p icmp --icmp-type echo-request -j ACCEPT
 }
