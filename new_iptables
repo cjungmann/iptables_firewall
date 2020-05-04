@@ -14,7 +14,7 @@ declare -a CLOPTS=(
     "i|ETH_INT|Set internal interface name"
     "e|ETH_EXT|Set external interface name"
     "n|INT_NET|Set LAN IP Address range"
-    "s|SAVE_SETTINGS|Save settings at script termination (otherwise iptables set to permissive)"
+    "s|-SAVE_SETTINGS|Save settings at script termination (otherwise iptables set to permissive)"
 )
 
 # The starting point for this version of an iptables-generating script
