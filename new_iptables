@@ -146,14 +146,20 @@ ipt_add_nat_forward_out_rule()
         fi
     done
 
-    # Unspecified protocol, use tcp
-    if [ "${#protos[@]}" -eq 0 ]; then
-        protos=( tcp )
-    fi
+    if [ "$port" ]; then
+        # Unspecified protocol, use tcp
+        if [ "${#protos[@]}" -eq 0 ]; then
+            protos=( tcp )
+        fi
 
-    for proto in "${protos[@]}"; do
-        $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -p $proto --dport $port -j ACCEPT
-    done
+        for proto in "${protos[@]}"; do
+            if [[ "tcp udp" =~ "$proto" ]]; then
+                $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -p $proto --dport $port -j ACCEPT
+            else
+                echo "Port protocol [32;1m$proto[m is not recognized."
+            fi
+        done
+    fi
 }
 
 ipt_restrictive_forward_rules()
