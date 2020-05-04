@@ -5,6 +5,7 @@ source nif_info
 declare ETH_INT=$( nif_find_external_name )
 declare ETH_EXT=$( nif_find_first_internal_name )
 declare INT_NET=192.168.0.0/24
+declare SAVE_SETTINGS=0
 
 source bash_clargs
 
@@ -13,6 +14,7 @@ declare -a CLOPTS=(
     "i|ETH_INT|Set internal interface name"
     "e|ETH_EXT|Set external interface name"
     "n|INT_NET|Set LAN IP Address range"
+    "s|SAVE_SETTINGS|Save settings at script termination (otherwise iptables set to permissive)"
 )
 
 # The starting point for this version of an iptables-generating script
@@ -59,9 +61,9 @@ ipt_flush()
     $IPT -X           # Delete non-built-in chains
 
     # Set policies to DROP if not explicitely accepted
-    $IPT -P INPUT DROP
-    $IPT -P OUTPUT DROP
-    $IPT -P FORWARD DROP
+    $IPT -P INPUT $policy
+    $IPT -P OUTPUT $policy
+    $IPT -P FORWARD $policy
 
     # Use connection tracking modules
     $MPR nf_conntrack
@@ -158,9 +160,9 @@ ipt_restrictive_forward_rules()
 {
     $IPT -A FORWARD -i $ETH_EXT -o $ETH_INT -m state --state RELATED,ESTABLISHED -j ACCEPT
 
-    if [ -f ipt_forward_allowed ]; then
+    if [ -f ipt_forward_ports ]; then
         local IFS=$'\n'
-        local -a ports=( $( cat ipt_forward_allowed ) )
+        local -a ports=( $( cat ipt_forward_ports ) )
         local -a aport
         for port in "${ports[@]}"; do
             ipt_add_nat_forward_out_rule $port
@@ -201,7 +203,9 @@ if is_root; then
     iptables-save
     echo "[m"
 
-    ipt_flush "ACCEPT"
+    if [ "$SAVE_SETTINGS" -eq 0 ]; then
+        ipt_flush "ACCEPT"
+    fi
 else
     echo "Must be root to run."
 fi
