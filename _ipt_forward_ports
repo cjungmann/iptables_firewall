@@ -23,5 +23,5 @@
 888  tcp       # CDDB (Compact Disk Database)
 993  tcp       # IMAP over TLS/SSL
 995  tcp udp   # POP over TLS/SSL
-3389 tcp udb   # Microsoft Terminal Server (RDP)
+3389 tcp udp   # Microsoft Terminal Server (RDP)
 8880 tcp       # CDDB alternate (see 888)
