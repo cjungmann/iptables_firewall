@@ -101,25 +101,41 @@ ipt_prepare_custom_tables()
     ipt_protocol_table "icmp"
 }
 
+ipt_generic_tables_rules()
+{
+    local table="$1"
+
+    # drop invalid
+    $IPT -A $table -m state --state INVALID -j DROP
+    
+    # accept established
+    $IPT -A $table -m state --state ESTABLISHED,RELATED -j ACCEPT
+    
+    # drop spoofedn (from LAN interface without LAN address)
+    $IPT -A $table -i $ETH_INT -s ! $INT_NET -j DROP
+
+    $IPT -A $table -p icmp --icmp-type echo-request -j ACCEPT
+}
+
 ipt_generic_input_rules()
 {
+    ipt_generic_tables_rules "INPUT"
+    
     # Accepting packets by port
     $IPT -A INPUT -p tcp --dport 22 -i $ETH_INT -j ACCEPT
 
     # Accepting packets by interface
     $IPT -A INPUT -i lo -j ACCEPT
+}
 
-    # Accept packets from established connections
-    $IPT -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    $IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-    # # Drop invalid packets
-    # $IPT -A INPUT -m state --state INVALID -j DROP
+ipt_generic_output_rules()
+{
+    ipt_generic_tables_rules "OUTPUT"
 }
 
 ipt_permissive_forward_rules()
 {
-    $IPT -A FORWARD -i $ETH_EXT -o $ETH_INT -m state --state RELATED,ESTABLISHED -j ACCEPT
+    ipt_generic_tables_rules "FORWARD"
 
     # Allow everything out:
     $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -j ACCEPT
@@ -153,9 +169,10 @@ ipt_add_nat_forward_out_rule()
         fi
 
         for proto in "${protos[@]}"; do
-            if [[ "tcp udp" =~ "$proto" ]]; then
-                $IPT -A INPUT -i $ETH_INT -p $proto --dport $port -j ACCEPT
-                $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -p $proto --dport $port -j ACCEPT
+            if [ "$proto" = "tcp" ]; then
+                $IPT -A FORWARD -p $proto -i $ETH_INT -s $INT_NET --dport $port --syn -m state --state NEW -j ACCEPT
+            elif [ "$proto" = "udp" ]; then
+                $IPT -A FORWARD -p $proto -i $ETH_INT -s $INT_NET --dport $port -m state --state NEW -j ACCEPT
             else
                 echo "Port protocol [32;1m$proto[m is not recognized."
             fi
@@ -165,7 +182,9 @@ ipt_add_nat_forward_out_rule()
 
 ipt_restrictive_forward_rules()
 {
-    $IPT -A FORWARD -i $ETH_EXT -o $ETH_INT -m state --state RELATED,ESTABLISHED -j ACCEPT
+    ipt_generic_tables_rules "FORWARD"
+
+    $IPT -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 
     if [ -f ipt_forward_ports ]; then
         local IFS=$'\n'
@@ -175,6 +194,8 @@ ipt_restrictive_forward_rules()
             ipt_add_nat_forward_out_rule $port
         done
     fi
+
+    $IPT -A FORWARD -p icmp --icmp-type echo-request -j ACCEPT
 
     # Fall out to default DROP polify
 }
@@ -193,8 +214,11 @@ ipt_nat_rules()
 main()
 {
     ipt_flush
+
     ipt_generic_input_rules
-    ipt_prepare_custom_tables
+    ipt_generic_output_rules
+
+    # ipt_prepare_custom_tables
 
     ipt_restrictive_forward_rules
 
