@@ -113,8 +113,8 @@ ipt_generic_input_rules()
     $IPT -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     $IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-    # Drop invalid packets
-    $IPT -A INPUT -m state --state INVALID -j DROP
+    # # Drop invalid packets
+    # $IPT -A INPUT -m state --state INVALID -j DROP
 }
 
 ipt_permissive_forward_rules()
@@ -154,6 +154,7 @@ ipt_add_nat_forward_out_rule()
 
         for proto in "${protos[@]}"; do
             if [[ "tcp udp" =~ "$proto" ]]; then
+                $IPT -A INPUT -i $ETH_INT -p $proto --dport $port -j ACCEPT
                 $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -p $proto --dport $port -j ACCEPT
             else
                 echo "Port protocol [32;1m$proto[m is not recognized."
