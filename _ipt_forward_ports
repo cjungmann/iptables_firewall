@@ -1,0 +1,27 @@
+# -*- mode:sh -*-
+
+# Each line identifies a port number and the protocols that
+# should be allowed through the firewall.
+# A Hash/she/sharp symbol (#) introduces a comment, and text
+#
+# following this symbol will be ignored by the processor
+
+20   tcp       # FTP data transfer
+21   tcp       # FTP command
+22   tcp       # SSH
+25   tcp       # SMTP
+43   tcp       # WHOIS protocol
+80   tcp       # HTTP
+53   tcp udp   # external DNS Servers
+109  tcp       # POP2
+110  tcp       # POP3
+123  udp       # NTP (Network Time Protocol)
+143  tcp       # IMAP
+443  tcp       # HTTPS
+465  tcp       # SMTP over TLS/SSL
+587  tcp       # SMTP over TLS/SSL
+888  tcp       # CDDB (Compact Disk Database)
+993  tcp       # IMAP over TLS/SSL
+995  tcp udp   # POP over TLS/SSL
+3389 tcp udb   # Microsoft Terminal Server (RDP)
+8880 tcp       # CDDB alternate (see 888)
