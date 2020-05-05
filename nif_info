@@ -206,7 +206,8 @@ nif_find_first_internal_name() { nif_get_first_internal_info -n; }
 
 nif_confirm_resolv_ctl_available()
 {
-    resolvectl system > /dev/null
+    systemd-resolve --status > /dev/null
+    # resolvectl system > /dev/null
     if [ "$?" -ne 0 ]; then
         echo "The resolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'"
         exit 1
