@@ -2,9 +2,10 @@
 
 source nif_info
 
-declare ETH_INT=$( nif_find_external_name )
-declare ETH_EXT=$( nif_find_first_internal_name )
-declare INT_NET=192.168.0.0/24
+declare ETH_EXT=$( nif_find_external_name )
+declare ETH_INT=$( nif_find_first_internal_name )
+declare IP_INT=$( nif_find_first_internal_addr )
+declare INT_NET=$( nif_network_source_address "$IP_INT" )
 declare SAVE_SETTINGS=0
 
 source bash_clargs
@@ -69,36 +70,6 @@ ipt_flush()
     $MPR nf_conntrack
     $MPR iptable_nat
     $MPR ipt_iprange
-}
-
-ipt_protocol_table()
-{
-    local table="$1"
-    local -a args=(
-        -A INPUT
-        -p "${table,,}"
-    )
-
-    if [ "${table,,}" = "tcp" ]; then
-        args=( "${args[@]}" --syn )
-    fi
-
-    args=(
-        "${args[@]}"
-        -m conntrack
-        --ctstate NEW
-        -j "${table^^}"
-    )
-    
-    $IPT -N "${table^^}"
-    $IPT "${args[@]}"
-}
-
-ipt_prepare_custom_tables()
-{
-    ipt_protocol_table "tcp"
-    ipt_protocol_table "udp"
-    ipt_protocol_table "icmp"
 }
 
 ipt_generic_tables_rules()
@@ -219,8 +190,6 @@ main()
 
     ipt_generic_input_rules
     ipt_generic_output_rules
-
-    # ipt_prepare_custom_tables
 
     ipt_restrictive_forward_rules
 
