@@ -17,9 +17,10 @@ source bash_clargs
 # This script file collects network information
 source nif_info
 
-declare IF_EXT
-declare IF_INT
-declare INT_NET=192.168.10.0
+declare IF_EXT=$( nif_find_external_name )
+declare IF_INT=$( nif_find_first_internal_name )
+declare IP_INT=$( nif_find_first_internal_addr )
+declare INT_NET=$( nif_network_source_address "$IP_INT" )
 declare -i SKIP_INTERACTIVE=0
 declare -i WRITE_CONFIGS=0
 
