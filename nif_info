@@ -40,7 +40,7 @@ nif_discern_external_iface()
             return 0
         fi
     else
-        echo "There are no DN Servers found."
+        echo "There are no DN Servers found." >&2
     fi
     return 1
 }
@@ -119,7 +119,7 @@ nif_is_internal()
                 return 0
             fi
         else
-            echo "The ip address,'${parts[1]}', doesn't seem to be an IP address"
+            echo "The ip address,'${parts[1]}', doesn't seem to be an IP address" >&2
         fi
     elif [ "${#parts[@]}" -eq 1 ]; then
         return 0
@@ -135,11 +135,15 @@ nif_get_name()
     echo "${parts[0]}" 
 }
 
+# Since we need to second array element, make sure you
+# call this function with a quoted "$iface" so the spaces
+# will be included in the string to be parsed into an
+# array.
 nif_get_addr()
 {
     local IFS=$' '
     local -a parts=( $1 )
-    if [ "${#parts[0]}" -gt 1 ]; then
+    if [ "${#parts[*]}" -gt 1 ]; then
         echo "${parts[1]}"
         return 0
     fi
@@ -151,14 +155,13 @@ nif_get_external_info()
 {
     local op="${1:-'-a'}"
     if ! [[ "-a -n" =~ "$op" ]]; then
-        echo "Unrecognized parameter [32;1m$op["
+        echo "Unrecognized parameter [32;1m$op[m" >&2
         return 1
     fi
 
     local iface
     for iface in "${IFACES[@]}"; do
         if nif_is_external "$iface"; then
-            echo "Found external " >&2
             if [ "$op" == "-a" ]; then
                 nif_get_addr "$iface"
                 return 0
@@ -177,18 +180,17 @@ nif_get_first_internal_info()
 {
     local op="${1:-'-a'}"
     if ! [[ "-a -n" =~ "$op" ]]; then
-        echo "Unrecognized parameter [32;1m$op["
+        echo "Unrecognized parameter [32;1m$op[m" >&2
         return 1
     fi
+
     local iface
     for iface in "${IFACES[@]}"; do
         if nif_is_internal "$iface"; then
             if [ "$op" == "-a" ]; then
-                echo "Found internal, ($iface) return address " >&2
                 nif_get_addr "$iface"
                 return 0
             elif [ "$op" == "-n" ]; then
-                echo "Found internal, ($iface) return name " >&2
                 nif_get_name "$iface"
                 return 0
             fi
@@ -209,7 +211,7 @@ nif_confirm_resolv_ctl_available()
     systemd-resolve --status > /dev/null
     # resolvectl system > /dev/null
     if [ "$?" -ne 0 ]; then
-        echo "The resolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'"
+        echo "The resolvectl system is not available.  Enable it by invoking 'systemctl enable systemd-resolved.service'" >&2
         exit 1
     fi
 }
