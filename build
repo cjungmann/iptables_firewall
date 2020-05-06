@@ -52,66 +52,72 @@ get_keypress()
     echo "${chars[*]}"
 }
 
-get_ip4_address()
+validate_ip4()
 {
-    local -n ret_val="$1"
     local IFS=$'.'
-    local -a aparts=( $2 )
-
-    local hilite="[32;1m"
-    local unlite="[m"
-
-    local -i position=0
-    local -i index
+    local -a parts=( $1 )
     local part
-    local -i curpart
-    local resp
-
-    # Do not leave IFS='.' or periods will be invisible to the 'read' command
-    IFS=''
-
-    while true; do
-        clear_screen
-
-        # Print IP address with current spot highlighted:
-        index=0
-        for part in "${aparts[@]}"; do
-            if [ "$index" -gt 0 ]; then
-                echo -n '.'
+    local -i pval
+    if [ "${#parts[@]}" -eq 4 ]; then
+        for part in "${parts[@]}"; do
+            echo "part is '[32;1m${part}[m'"
+            if [[ "${part}" =~ [0-9]+ ]]; then
+                pval="$part"
+                if [ "$pval" -gt 255 ]; then
+                   echo "The value, '$part', is out of range." >&2
+                   read -n1
+                   return 1
+                fi
+            else
+                echo "The value, '$part' is not a number." >&2
+                read -n1
+                return 1
             fi
-            if [ "$index" -eq "$position" ]; then
-                echo -n "$hilite"
-            fi
-            echo -n "${part}${unlite}"
-            (( ++index ))
         done
+        
+    else
+        echo "Invalid IP address, it has ${#parts[@]} parts, it should have 4." >&2
+        read -n1
+        return 1
+    fi
+
+    return 0
+
+}
+
+get_int_net()
+{
+    local -n ip4val="$1"
+    local prompt
+    if [ "${#ip4val}" -gt 6 ]; then
+        prompt="Currently ${ip4val}, enter"
+    else
+        prompt="Enter"
+    fi
+
+    local newip4
+    while [ 1 -eq 1 ]; do
+        clear_screen
+        echo "Enter the network source IP address."
         echo
-
-        curpart="${aparts[$position]}"
-
-        resp=$( get_keypress "Type a number to set, period to advance, s to save, q to quit. ")
-        # read -n 1 -r -p "Type a number to set, period to switch, s to save, q to quit. " resp
-        echo 
-        echo "resp has ${#resp} characters, is $resp"
-        if [[ "$resp" =~ [0-9] ]]; then
-            curpart="${curpart}${resp}"
-            aparts[$position]="$curpart"
-        elif [ "$resp" = '.' ]; then
-            (( ++position ))
-        elif [ "$resp" = 's' ]; then
-            IFS=$'.'
-            ret_val="${aparts[*]}"
-            return 0
-        elif [ "$resp" = 'q' ]; then
-            return 1
-        elif [ "${#resp}" -eq 1 ]; then
-            printf "The single character is %d." "'$resp"
-            read -n1
+        read -p "$prompt an IP address, or 'q' to quit: " newip4
+        if [ "$?" -eq 0 ]; then
+            if [ "$newip4" = 'q' ]; then
+                return 1;
+            elif validate_ip4 "$newip4"; then
+                ip4val="$newip4"
+                return 0
+            else
+                echo "Invalid ip address."
+            fi
         else
-            echo "resp is ${#resp} characters long: $resp"
-            read -n1
+            echo "Read returned a non-zero exit value."
+            break
         fi
     done
+
+    read -n1
+    return 1
 }
 
 get_iface_name_index()
@@ -284,9 +290,7 @@ confirm_network_defaults()
                 if select_interface new_iface "$if_int" "internal"; then
                     if_int="$new_iface"
                 fi ;;
-            3 ) if get_ip4_address new_address "$int_net"; then
-                    int_net=$new_address
-                fi ;;
+            3 ) get_int_net "int_net" ;;
             a ) break ;;
             q ) exit 0 ;;
             * ) echo "Unknown entry.  Try again." ;;
