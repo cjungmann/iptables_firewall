@@ -52,24 +52,6 @@ get_keypress()
     echo "${chars[*]}"
 }
 
-set_network_defaults()
-{
-    local iface
-    local name
-    for iface in "${IFACES[@]}"; do
-        name=$( nif_get_name "$iface" )
-        if nif_is_external "$iface"; then
-            IF_EXT=$name
-        else
-            IF_INT=$name
-        fi
-
-        if [ "$IF_EXT" ] && [ "$IF_INT" ]; then
-            break
-        fi
-    done
-}
-
 get_ip4_address()
 {
     local -n ret_val="$1"
@@ -312,8 +294,6 @@ confirm_network_defaults()
     done
 }
 
-
-set_network_defaults
 
 bash_clargs_process "$@"
 
