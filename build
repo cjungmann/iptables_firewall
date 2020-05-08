@@ -264,6 +264,11 @@ update_default_isc_dhcp_server()
     )
 
     sed -i "${sargs[@]}" /etc/default/isc-dhcp-server
+    if [ $? -eq 0 ]; then
+        echo "Success updating [32;1m/etc/default/isc-dhcp-server[m"
+    else
+        echo "[31;1mFAILED[m updating [31;1m/etc/default/isc-dhcp-server[m"
+    fi
 }
 
 confirm_network_defaults()
