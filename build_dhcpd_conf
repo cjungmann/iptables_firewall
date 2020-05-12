@@ -114,8 +114,22 @@ write_dhcpd()
     
 }
 
+hl_install()
+{
+    local name="$1"
+
+    if already_installed "$name"; then
+        echo "[32;1m${name}[m is already installed"
+    else
+        echo "Installing [33;1m${name}[m"
+        sudo apt-get -y install "${name}"
+    fi
+}
+
 
 bash_clargs_process "$@"
+
+hl_install isc-dhcp-server
 
 write_dhcpd
 
