@@ -221,7 +221,7 @@ nif_network_source_address()
     local IFS=$'.'
     local -a parts=( $1 )
     if [ "${#parts[@]}" -eq 4 ]; then
-        echo "${parts[*]:0:3}.0/24"
+        echo "${parts[*]:0:3}.0"
     fi
 }
 
