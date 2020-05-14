@@ -28,6 +28,15 @@ clear_screen() { echo -n "[2J"; }
 is_root() { [ "$USER" = "root" ]; }
 is_write_mode() { [ "$WRITE_CONFIGS" -eq 1 ]; }
 
+already_installed()
+{
+    local pname="$1"
+    local gresult
+    gresult=$( dpkg -s "${pname}" 2>/dev/null | grep ^Status )
+    # falling out of function will allow calling function to
+    # query the result of the `which` command.
+}
+
 get_keypress()
 {
     local prompt="${1:=Press any key}"
@@ -237,21 +246,33 @@ generate_dhcpd()
 {
     local -a args=(
         -a "$INT_NET"
-        -l "$IF_INT"
-        -w "$IF_EXT"
+        -i "$IF_INT"
+        -e "$IF_EXT"
     )
 
     local target="$1"
 
     if is_write_mode; then
         backup_script "$target"
-        ./build_dhcpd_conf > "$target"
+        ./build_dhcpd_conf "${args[@]}" > "$target"
     else
         echo
         echo "[33;1m$target[m:"
         ./build_dhcpd_conf
         echo
     fi
+}
+
+prepare_iptables()
+{
+    local -a args=(
+        -a "$INT_NET"
+        -i "$IF_INT"
+        -e "$IF_EXT"
+        -s
+    )
+
+    ./new_iptables "${args[@]}"
 }
 
 update_default_isc_dhcp_server()
@@ -306,6 +327,8 @@ confirm_network_defaults()
 
 bash_clargs_process "$@"
 
+echo "INT_NET has ${#INT_NET} characters"
+
 bash_clargs_show
 
 if [ "${SKIP_INTERACTIVE}" -eq 0 ]; then
@@ -314,12 +337,21 @@ fi
 
 if is_write_mode; then
     if is_root; then
+        if [ "${#INT_NET}" -lt 8 ]; then
+            echo "Missing valid internal network address."
+            exit 1
+        fi
+
+        hl_install isc-dhcp-server
+
         echo "About to write dhcp server configuration files."
         generate_dhcpd "/etc/dhcp/dhcpd.conf"
         update_default_isc_dhcp_server
 
         echo "Starting isc-dhcp-server"
         service isc-dhcp-server restart
+
+        prepare_iptables
     else
         echo "Must be root to write scripts."
     fi
