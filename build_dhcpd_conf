@@ -27,17 +27,18 @@ declare -a CLOPTS=(
     "a|SUBNET_ADDRESS|Set subnet address"
     "b|BROADCAST_OCTET|Value to use for the final octet of the broadcast address"
     "d|DEFAULT_LEASE_TIME|Default Lease Time"
+    "e|WAN_IF|WAN (External) Interface"
     "h|->bash_clargs_usage|Show options and meanings"
-    "l|LAN_IF|LAN Interface"
+    "i|LAN_IF|LAN (Internal) Interface"
     "m|MAX_LEASE_TIME|Max Lease Time"
     "n|NETMASK|Subnet netmask"
     "r|RESERVED|Highest reserved least-significant IP address"
-    "s|->bash_clargs_show|Show current state of arguments"
     "u|UPDATE_STYLE|Update style"
-    "w|WAN_IF|WAN Interface"
 )
 
 IFS="$OIFS"
+
+is_root() { [ "$USER" = "root" ]; }
 
 
 show_dn_servers()
@@ -114,22 +115,7 @@ write_dhcpd()
     
 }
 
-hl_install()
-{
-    local name="$1"
-
-    if already_installed "$name"; then
-        echo "[32;1m${name}[m is already installed"
-    else
-        echo "Installing [33;1m${name}[m"
-        sudo apt-get -y install "${name}"
-    fi
-}
-
-
 bash_clargs_process "$@"
-
-hl_install isc-dhcp-server
 
 write_dhcpd
 
