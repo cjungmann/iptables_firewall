@@ -19,3 +19,12 @@ to a page that seems helpful now, and I may add additional pages
 if needed and they merit.
 
 [Raspberry PI DHCP Server](http://www.noveldevices.co.uk/rp-dhcp-server)
+
+## IPTables NAT
+
+In an older NAT installation, one added a '1' to the *ip_forward*
+and *ip_dynaddr* files in */proc/sys/net/ipv4* directory.  Newer
+instructions, found in these [quick tips](https://www.revsys.com/writings/quicktips/nat.html)
+informed me that I have to make changes in the
+*/etc/sysctl.conf* file.  Look in *new_iptables* for the
+*sed* script that makes the changes.
