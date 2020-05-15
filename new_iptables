@@ -178,11 +178,20 @@ ipt_nat_rules()
 {
     $IPT -t nat -A POSTROUTING -s "$INT_NET" -o "$ETH_EXT" -j MASQUERADE
 
+    # Using an array in case it's appropriate to make
+    # multiple changes in sysctl.conf
+    local -a args=(
+        -e 's/#\(net.ipv4.ip_forward\.*\)/\1/'
+    )
+
+    sed -i "${args[@]}" /etc/sysctl.conf
+
     # enable ip forwarding and dynamic addressing:
     echo 1 > /proc/sys/net/ipv4/ip_forward
-    echo 1 > /proc/sys/net/ipv4/ip_dynaddr
-}
 
+    # This line seems to be no longer necessary:
+    # echo 1 > /proc/sys/net/ipv4/ip_dynaddr
+}
 
 main()
 {
