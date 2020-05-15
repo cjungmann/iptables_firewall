@@ -83,27 +83,15 @@ ipt_generic_tables_rules()
     $IPT -A $table -m state --state ESTABLISHED,RELATED -j ACCEPT
     
     if [ "$table" != "OUTPUT" ]; then
-        # drop spoofedn (from LAN interface without LAN address)
-        $IPT -A $table -i $ETH_INT ! -s $INT_NET -j DROP
+        if [ "${#INT_NET}" -gt 8 ]; then
+            # drop spoofedn (from LAN interface without LAN address)
+            $IPT -A $table -i $ETH_INT ! -s $INT_NET -j DROP
+        else
+            echo "Failed to add anti-spoofing rule due to missing INT_NET value."
+        fi
     fi
 
     $IPT -A $table -p icmp --icmp-type echo-request -j ACCEPT
-}
-
-ipt_generic_input_rules()
-{
-    ipt_generic_tables_rules "INPUT"
-    
-    # Accepting packets by port
-    $IPT -A INPUT -p tcp --dport 22 -i $ETH_INT -j ACCEPT
-
-    # Accepting packets by interface
-    $IPT -A INPUT -i lo -j ACCEPT
-}
-
-ipt_generic_output_rules()
-{
-    ipt_generic_tables_rules "OUTPUT"
 }
 
 ipt_permissive_forward_rules()
@@ -114,6 +102,35 @@ ipt_permissive_forward_rules()
     $IPT -A FORWARD -i $ETH_INT -o $ETH_EXT -j ACCEPT
 
     # Fall out to default DROP polify
+}
+
+declare DEF_RULE_ARGS=( -m state --state NEW -j ACCEPT )
+
+ipt_add_rule()
+{
+    local table="${1^^}"
+    local -i port="$2"
+    local proto="$3"
+
+    local -a args=( "${DEF_RULE_ARGS[@]}" )
+
+    if [ "$proto" = "tcp" ]; then
+        args=( --syn "${args[@]}" )
+    fi
+
+    if [ "$#" -gt 3 ]; then
+        args=( "${@:4:}" "${args[@]}" )
+    fi
+
+    args=(
+        -A "$table"
+        -p "$proto"
+        --dport "$port"
+        "${args[@]}"
+    )
+
+    # echo "args are [32;1m${args[*]}[m"
+    $IPT "${args[@]}"
 }
 
 ipt_add_nat_forward_out_rule()
@@ -143,9 +160,9 @@ ipt_add_nat_forward_out_rule()
 
         for proto in "${protos[@]}"; do
             if [ "$proto" = "tcp" ]; then
-                $IPT -A FORWARD -p $proto -i $ETH_INT -s $INT_NET --dport $port --syn -m state --state NEW -j ACCEPT
+                $IPT -A FORWARD -p $proto -i $ETH_INT --dport $port --syn -m state --state NEW -j ACCEPT
             elif [ "$proto" = "udp" ]; then
-                $IPT -A FORWARD -p $proto -i $ETH_INT -s $INT_NET --dport $port -m state --state NEW -j ACCEPT
+                $IPT -A FORWARD -p $proto -i $ETH_INT --dport $port -m state --state NEW -j ACCEPT
             else
                 echo "Port protocol [32;1m$proto[m is not recognized."
             fi
@@ -173,10 +190,37 @@ ipt_restrictive_forward_rules()
     # Fall out to default DROP polify
 }
 
+ipt_generic_input_rules()
+{
+    ipt_generic_tables_rules "INPUT"
+    
+    # Accepting packets by port
+    ipt_add_rule INPUT 22 tcp -i $ETH_INT
+    # $IPT -A INPUT -p tcp --dport 22 -i $ETH_INT -j ACCEPT
+
+    # Accepting packets by interface
+    $IPT -A INPUT -i lo -j ACCEPT
+}
+
+ipt_generic_output_rules()
+{
+    ipt_generic_tables_rules "OUTPUT"
+
+    ipt_add_rule output 53 tcp -o $ETH_OUT    # allow DNS requests
+    ipt_add_rule output 53 udp -o $ETH_OUT    # allow DNS requests
+
+    ipt_add_rule output 80 tcp    # allow http requests
+    ipt_add_rule output 443 tcp   # allow https requests (for git)
+    ipt_add_rule output 9418 tcp  # allow unauthenticated git requests
+ 
+    ipt_add_rule output 123 udp   # allow NTP (network time protocol)
+}
+
 
 ipt_nat_rules()
 {
-    $IPT -t nat -A POSTROUTING -s "$INT_NET" -o "$ETH_EXT" -j MASQUERADE
+    # $IPT -t nat -A POSTROUTING -s "$INT_NET" -o "$ETH_EXT" -j MASQUERADE
+    $IPT -t nat -A POSTROUTING -o "$ETH_EXT" -j MASQUERADE
 
     # Using an array in case it's appropriate to make
     # multiple changes in sysctl.conf
