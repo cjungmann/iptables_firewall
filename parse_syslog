@@ -1,0 +1,319 @@
+#!/usr/bin/env bash
+
+declare SOURCE="${1:-/var/log/syslog}"
+
+declare FIELD_DELIM=$'\t'
+
+declare -A FIELDS=()
+declare -a FIELDNAMES=()
+declare -a LINES=()
+
+clear_screen() { echo -n "[2J"; }
+top_screen()   { echo -n "[1;1H"; }
+
+# Waits for and returns single keypress, even if it is
+# represented by multiple characters.
+get_keypress()
+{
+    # IFS characters will be invisible to 'read', so:
+    local IFS=''
+
+    local prompt="${1:=Press any key}"
+
+    # Array to collect chars in case of multi-char keypress
+    local -a chars=( )
+    
+    # Wait for a keypress (-n 1), save to array
+    local keychar
+    read -n 1 -s -r -p "${prompt}" keychar
+    chars=( "$keychar" )
+
+    # Collect additional characters if available, especially for escape characters
+    while read -t 0; do
+        read -n 1 keychar
+        chars=( "${chars[@]}" "$keychar" )
+    done
+
+    # empty IFS so array is joined without delimiters
+    echo "${chars[*]}"
+}
+
+# Enter escape character in EMACS with C-q, ESC
+# (see documentation: info emacs -n "Inserting Text")
+declare keypress_down_arrow='[B'
+declare keypress_up_arrow='[A'
+
+
+field_added() { [ -v FIELDS[$1] ]; }
+
+# Returns the field index through echo.  Does not disturb
+# the global FIELDS array.
+field_index()
+{
+    if field_added "$1"; then
+        echo "${FIELDS[$1]}"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Returns field index, creating new array entry if not found
+# Use this function to prepare the array because it can run
+# in the same process as the caller, so it can affect the 
+# global FIELDS array.
+prepare_field_index()
+{
+    local -n retval="$1"
+    local name="$2"
+    if field_added $name; then
+        retval="${FIELDS[$name]}"
+    else
+        retval="${#FIELDS[@]}"
+        FIELDS["$name"]="$retval"
+        FIELDNAMES=( "${FIELDNAMES[@]}" "$name" )
+    fi
+}
+
+element_included()
+{
+    local -n source="$1"
+    local needle="$2"
+    local value
+    for value in "${source[@]}"; do
+        if [ "$value" = "$needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+process_syslog_line()
+{
+    local IFS=$' '
+    local -a rawline=( $1 )
+    local -n Lines=LINES
+    local -a line=()
+
+    local elem name value index
+    local -a pair
+    IFS=$'='
+    for elem in "${rawline[@]}"; do
+        if [[ "$elem" =~ ([^=]+)=([^[:space:]]+) ]]; then
+            pair=( $elem )
+            name="${pair[0]}"
+            value="${pair[1]}"
+            prepare_field_index index $name
+            line[$index]="$value"
+        fi
+    done
+
+    IFS="$FIELD_DELIM"
+    Lines=("${Lines[@]}" "${line[*]}" )
+}
+
+read_syslog()
+{
+    local line
+    local -i count=0
+
+    while read -r line; do
+        if [[ "$line" =~ \.*IPT\.* ]]; then
+            process_syslog_line "$line"
+            (( ++count ))
+        fi
+    done < "$SOURCE"
+}
+
+make_field_indicies_array()
+{
+    local -n target="$1"
+    local -n source="$2"
+    local field
+    for field in "${source[@]}"; do
+        field="${field^^}"
+        if [ -v FIELDS[$field] ]; then
+            target=( "${target[@]}" "${FIELDS[$field]}" )
+        else
+            echo "Field $field was not found." >&2
+        fi
+    done
+}
+
+get_field_max_width()
+{
+    local -i curw maxw="${#1}"
+
+    local IFS="$FIELD_DELIM"
+    local line
+    local -a lparts
+    local -i ndx
+    if ndx=$( field_index "$1" ); then
+
+        for line in "${LINES[@]}"; do
+            lparts=( $line )
+            curw="${#lparts[$ndx]}"
+            if [ "$curw" -gt "$maxw" ]; then
+                maxw="$curw"
+            fi
+        done
+    fi
+    echo "$maxw"
+}
+
+make_field_widths_array()
+{
+    local -n target="$1"
+    local -n source="$2"
+    target=()
+    local -i ndx=0
+    for name in "${source[@]}"; do
+        target[$(( ndx++ ))]=$( get_field_max_width "$name" )
+    done
+}
+
+display_selection_fields()
+{
+    local -n sellist="$1"
+    local -n hilite="$2"
+
+    local fname
+    local -i ndx
+
+    local -i curline=0
+    for fname in "${FIELDNAMES[@]}"; do
+        if [ "$(( curline++ ))" -eq "$hilite" ]; then
+            echo -n "[44m"
+        fi
+
+        if element_included sellist "$fname"; then
+            echo -n "|X| "
+        else
+            echo -n "| | "
+        fi
+        echo "$fname[m"
+    done
+}
+
+toggle_field()
+{
+    local -n target="$1"
+    local tname="$2"
+    local name
+    local -i index=0
+    local -i index_limit="${#target[@]}"
+
+    # Simple process for an empty array
+    if [ "$index_limit" -eq 0 ]; then
+        echo "$tname"
+        return 0
+    fi
+
+    for name in "${target[@]}"; do
+        # Found? remove it
+        if [ "$name" = "$tname" ]; then
+            if [ "$index" -eq 0 ]; then
+                echo "${target[*]:1}"
+                return 0
+            else
+                echo "${target[*]:0:$index} ${target[$(( index+1 ))]}"
+                return 0
+            fi
+        fi
+
+        (( ++index ))
+    done
+
+    # Not found? add to end:
+    echo "${target[*]} $tname"
+    return 0
+}
+
+select_fields()
+{
+    local -n target="$1"
+    local -a tmirror=( "${target[@]}" )
+
+    local -i active_line=0
+    local -i line_limit="${#FIELDNAMES[@]}"
+
+    local prompt="UP or DOWN arrows to move, SPACE to toggle, a to accept, q to abort"
+    local keystroke
+
+    while true; do
+        clear_screen
+        top_screen
+        display_selection_fields tmirror active_line
+
+        keystroke=$( get_keypress "$prompt" )
+        case "$keystroke" in
+            "$keypress_down_arrow" ) (( ++active_line )) ;;
+            "$keypress_up_arrow" ) (( --active_line )) ;;
+
+            ' ') tmirror=( $( toggle_field tmirror "${FIELDNAMES[$active_line]}" ) ) ;;
+            a ) target=( "${tmirror[@]}" ); return 0 ;;
+            q ) return 1 ;;
+            *)
+                if [ "${keystroke:0:1}" = "" ]; then
+                    keystroke="^[${keystroke:1}"
+                fi
+                echo "keystroke is [32m${keystroke}[m" ;;
+        esac
+
+        if [ "$active_line" -lt 0 ]; then
+            active_line=0
+        elif [ "$active_line" -ge "$line_limit" ]; then
+            active_line=$(( line_limit-1 ))
+        fi
+    done
+}
+
+show_lines()
+{
+    local -a fields=( "$@" )
+    if [ "${#fields[@]}" -eq 0 ]; then
+        fields=( ${!FIELDS[@]} )
+    fi
+    
+    local -a indicies=()
+    make_field_indicies_array indicies fields
+    make_field_widths_array widths fields
+
+    echo "widths = ${widths[*]}"
+
+    local IFS="$FIELD_DELIM"
+    local line value
+    local -a lparts
+    local -i ndx
+    local -i colw valw
+    for line in "${LINES[@]}"; do
+        lparts=( $line )
+        for ndx in "${indicies[@]}"; do
+            colw="${widths[$ndx]}"
+            (( colw+=2 ))
+            format="%-${colw}s"
+            printf "$format" "${lparts[$ndx]}"
+        done
+        echo
+    done
+}
+
+
+main()
+{
+    read_syslog
+
+    local -a flist=()
+
+    if select_fields flist; then
+        echo
+        echo "About to run show lines with ${flist[*]}"
+
+        show_lines "${flist[@]}"
+    fi
+}
+
+
+main
+echo
+
