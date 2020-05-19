@@ -280,7 +280,8 @@ update_default_isc_dhcp_server()
     local iface="$IF_INT"
 
     local -a sargs=(
-        -e 's/\(INTERFACESv4=\"\).*/\1'"$1"'\"/'
+        -e "s#\(INTERFACESv4=\)\".*\$#\1\"${iface}\"#"
+        -e 's/^INTERFACESv6\.*/#\0/'
         -e 's/#\(DHCPDv4.*\)/\1/'
     )
 
