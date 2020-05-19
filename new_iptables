@@ -8,6 +8,10 @@ declare IP_INT=$( nif_find_first_internal_addr )
 declare INT_NET=$( nif_network_source_address "$IP_INT" )
 declare SAVE_SETTINGS=0
 
+declare -i LOG_FORWARD=0
+declare -i LOG_INPUT=0
+declare -i LOG_OUTPUT=0
+
 source bash_clargs
 
 declare -a CLOPTS=(
@@ -16,6 +20,10 @@ declare -a CLOPTS=(
     "e|ETH_EXT|Set external interface name"
     "a|INT_NET|Set LAN IP Address range"
     "s|-SAVE_SETTINGS|Save settings at script termination (otherwise iptables set to permissive)"
+
+    "F|-LOG_FORWARD|Log forward packets before acceptance"
+    "I|-LOG_INPUT|Log input packets before acceptance"
+    "O|-LOG_OUTPUT|Log output packets before acceptance"
 )
 
 # The starting point for this version of an iptables-generating script
@@ -75,6 +83,11 @@ ipt_flush()
 ipt_generic_tables_rules()
 {
     local table="$1"
+    local log_entry="$2"
+
+    if [ "$log_entry}" = "yes" ]; then
+        $IPT -A $table -m state --state NEW -j LOG --log-prefix="IPT $table ENTRY " --log-ip-options
+    fi
 
     # drop invalid
     $IPT -A $table -m state --state INVALID -j DROP
@@ -106,30 +119,92 @@ ipt_permissive_forward_rules()
 
 declare DEF_RULE_ARGS=( -m state --state NEW -j ACCEPT )
 
-ipt_add_rule()
+ipt_get_rule_args()
 {
-    local table="${1^^}"
-    local -i port="$2"
-    local proto="$3"
+    local -n gra_args="$1"
+    gra_args=( "${DEF_RULE_ARGS[@]}" )
 
-    local -a args=( "${DEF_RULE_ARGS[@]}" )
+    local table="${2^^}"
+    local -i port="$3"
+    local proto="$4"
 
     if [ "$proto" = "tcp" ]; then
-        args=( --syn "${args[@]}" )
+        gra_args=( --syn "${gra_args[@]}" )
     fi
 
-    if [ "$#" -gt 3 ]; then
-        args=( "${@:4:}" "${args[@]}" )
+    if [ "$#" -gt 4 ]; then
+        gra_args=( "${@:5}" "${gra_args[@]}" )
     fi
 
-    args=(
+    gra_args=(
         -A "$table"
         -p "$proto"
         --dport "$port"
-        "${args[@]}"
+        "${gra_args[@]}"
+    )
+}
+
+ipt_get_array_option_value()
+{
+    local -n l_args="$1"
+    local target="$2"
+    local arg
+    local -i found=0
+    for arg in "${l_args[@]}"; do
+        if [ "$found" -eq 0 ]; then
+            if [ "$arg" = "$target" ]; then
+                found=1
+            fi
+        else
+            echo "$arg"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+ipt_add_log_rule()
+{
+    local -n alr_args="$1"
+    local -a blargs=( "${alr_args[@]}" )
+
+    local table=$( ipt_get_array_option_value args "-A" )
+    local proto=$( ipt_get_array_option_value args "-p" )
+
+    local -i count="${#blargs[@]}"
+    local -i index=$(( count-1 ))
+    blargs[$index]="LOG"
+    blargs=(
+        "${blargs[@]}"
+        --log-prefix "\"IPT LOG Table $table \""
+        --log-ip-options
     )
 
-    # echo "args are [32;1m${args[*]}[m"
+    if [ "$proto" = "tcp" ]; then
+        blargs=( "${blargs[@]}" --log-tcp-options )
+    fi
+
+    $IPT "${blargs[@]}"
+}
+
+# Arguments are
+#   1: table name
+#   2: port number
+#   3: protocol (tcp, udp, etc)
+# extra parameters are added to the rule before submitting as iptables rule
+ipt_add_rule()
+{
+    local -a args
+    ipt_get_rule_args args "$@"
+
+    # Detect and log match if logging is requested:
+    local table=$( ipt_get_array_option_value args "-A" )
+    local -n log_match="LOG_$table"
+    if [ "$log_match" -ne 0 ]; then
+        ipt_add_log_rule args
+    fi
+
     $IPT "${args[@]}"
 }
 
@@ -159,20 +234,15 @@ ipt_add_nat_forward_out_rule()
         fi
 
         for proto in "${protos[@]}"; do
-            if [ "$proto" = "tcp" ]; then
-                $IPT -A FORWARD -p $proto -i $ETH_INT --dport $port --syn -m state --state NEW -j ACCEPT
-            elif [ "$proto" = "udp" ]; then
-                $IPT -A FORWARD -p $proto -i $ETH_INT --dport $port -m state --state NEW -j ACCEPT
-            else
-                echo "Port protocol [32;1m$proto[m is not recognized."
-            fi
+            local -a args
+            ipt_add_rule "FORWARD" "$port" "$proto" -i "$ETH_INT"
         done
     fi
 }
 
 ipt_restrictive_forward_rules()
 {
-    ipt_generic_tables_rules "FORWARD"
+    ipt_generic_tables_rules "FORWARD" "yes"
 
     $IPT -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 
@@ -187,6 +257,8 @@ ipt_restrictive_forward_rules()
 
     $IPT -A FORWARD -p icmp --icmp-type echo-request -j ACCEPT
 
+    # Log packet just before dropping:
+    $IPT -A FORWARD -j LOG --log-prefix "IPT FORWARD dropping " --log-ip-options --log-tcp-options
     # Fall out to default DROP polify
 }
 
@@ -195,9 +267,15 @@ ipt_generic_input_rules()
     ipt_generic_tables_rules "INPUT"
     
     # Accepting packets by port
-    ipt_add_rule INPUT 22 tcp -i $ETH_INT
-    # $IPT -A INPUT -p tcp --dport 22 -i $ETH_INT -j ACCEPT
+    ipt_add_rule INPUT 22 tcp -i $ETH_INT   # Restrictive, for deployment.  Does not allow access from outside of network
+    # ipt_add_rule INPUT 22 tcp             # Permissive, for debugging.  Allows SSH access from any interface
 
+    # $IPT -A INPUT -i $ETH_INT -p udp -s $INT_NET -m state --state NEW -j ACCEPT
+
+    # Accept DHCP requests:
+    ipt_add_rule INPUT 67 udp -i $ETH_INT
+    ipt_add_rule INPUT 68 udp -i $ETH_INT
+    
     # Accepting packets by interface
     $IPT -A INPUT -i lo -j ACCEPT
 }
@@ -206,8 +284,10 @@ ipt_generic_output_rules()
 {
     ipt_generic_tables_rules "OUTPUT"
 
-    ipt_add_rule output 53 tcp -o $ETH_OUT    # allow DNS requests
-    ipt_add_rule output 53 udp -o $ETH_OUT    # allow DNS requests
+    ipt_add_rule output 53 tcp -o $ETH_EXT  # allow DNS requests
+    ipt_add_rule output 53 udp -o $ETH_EXT  # allow DNS requests
+
+    ipt_add_rule output 67 udp -o $ETH_EXT  # request DHCP service from outside
 
     ipt_add_rule output 80 tcp    # allow http requests
     ipt_add_rule output 443 tcp   # allow https requests (for git)
