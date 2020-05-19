@@ -73,6 +73,14 @@ make_broadcast_address()
 {
     local IFS=$'.'
     local -a iparts=( $SUBNET_ADDRESS )
+    iparts[3]="255"
+    echo "${iparts[*]}"
+}
+
+make_router_address()
+{
+    local IFS=$'.'
+    local -a iparts=( $SUBNET_ADDRESS )
     iparts[3]="$BROADCAST_OCTET"
     echo "${iparts[*]}"
 }
@@ -82,7 +90,7 @@ create_basic_subnet()
     local IFS=$'.'
     local -a iparts=( $SUBNET_ADDRESS )
     local -a nmparts=( $NETMASK )
-    local -a router=$( make_broadcast_address )
+    local -a router=$( make_router_address )
 
     if [ "$RESERVED" -gt 0 ]; then
         local -a res_start=( "${iparts[@]:0:3}" "1" )
@@ -100,11 +108,15 @@ create_basic_subnet()
 
 write_dhcpd()
 {
-    make_dns_option_line
+    local -a broadcast=$( make_broadcast_address )
 
     echo "ddns-update-style ${UPDATE_STYLE};"
+    make_dns_option_line
+    echo "option broadcast-address $broadcast;"
+
     echo "default-lease-time $DEFAULT_LEASE_TIME;"
     echo "max-lease-time $MAX_LEASE_TIME;"
+    echo "log-facility local7;"
     echo
     echo "authoritative;"
     echo
