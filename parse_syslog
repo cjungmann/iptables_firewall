@@ -44,6 +44,7 @@ declare keypress_down_arrow='[B'
 declare keypress_up_arrow='[A'
 
 
+# Simple boolean function that names its test
 field_added() { [ -v FIELDS[$1] ]; }
 
 # Returns the field index through echo.  Does not disturb
@@ -58,10 +59,14 @@ field_index()
     fi
 }
 
-# Returns field index, creating new array entry if not found
-# Use this function to prepare the array because it can run
-# in the same process as the caller, so it can affect the 
-# global FIELDS array.
+# Like field_index(), returns the index if the name is found,
+# but it adds the name to the collection if it is not already
+# included in the array.
+#
+# Because this function modifies global variables, it must
+# not be called in a subprocess, that is, within $( ... )
+# operators.  The index value is returned to an indirect variable
+# that the calling function identifies in its parameter list.
 prepare_field_index()
 {
     local -n retval="$1"
@@ -75,12 +80,14 @@ prepare_field_index()
     fi
 }
 
+# Boolean function that indicates if a given "needle"
+# value ($2) is found in the "haystack" ($1).
 element_included()
 {
-    local -n source="$1"
+    local -n haystack="$1"
     local needle="$2"
     local value
-    for value in "${source[@]}"; do
+    for value in "${haystack[@]}"; do
         if [ "$value" = "$needle" ]; then
             return 0
         fi
@@ -88,6 +95,9 @@ element_included()
     return 1
 }
 
+# Supports read_syslog(), breaking a line into an array
+# of values, updating the FIELDS and FIELDNAMES arrays
+# as unknown columns are encountered.
 process_syslog_line()
 {
     local IFS=$' '
@@ -112,6 +122,7 @@ process_syslog_line()
     Lines=("${Lines[@]}" "${line[*]}" )
 }
 
+# Fill global variables with the contents of /var/log/syslog
 read_syslog()
 {
     local line
@@ -125,10 +136,19 @@ read_syslog()
     done < "$SOURCE"
 }
 
+# Make array of indicies matching the submitted field names
+# @param $1 (target) is the array in which the result is returned.
+# @param $2 (source) is an array of field names to be processed.
+# 
+# target will contain the field indexes into the array that is
+# resolved from lines in the LINES array.
 make_field_indicies_array()
 {
     local -n target="$1"
     local -n source="$2"
+
+    target=()
+
     local field
     for field in "${source[@]}"; do
         field="${field^^}"
@@ -140,38 +160,67 @@ make_field_indicies_array()
     done
 }
 
-get_field_max_width()
-{
-    local -i curw maxw="${#1}"
-
-    local IFS="$FIELD_DELIM"
-    local line
-    local -a lparts
-    local -i ndx
-    if ndx=$( field_index "$1" ); then
-
-        for line in "${LINES[@]}"; do
-            lparts=( $line )
-            curw="${#lparts[$ndx]}"
-            if [ "$curw" -gt "$maxw" ]; then
-                maxw="$curw"
-            fi
-        done
-    fi
-    echo "$maxw"
-}
-
+# Get max length for each requested column
+# @param $1 (target) is the array in which the result is returned.
+# @param $2 (source) is an array of column indices whose max length
+#           is to be calculated.  This is array is the result of the
+#           make_field_indicies_array() function.
+# @param $3 is the additional spaces to add to each max value
+#           to separate the columns.
 make_field_widths_array()
 {
     local -n target="$1"
     local -n source="$2"
+    local -i margin="${3:0}"
+
+    # Initialize the array with the length of the FIELD name,
+    # which will head each column:
     target=()
-    local -i ndx=0
-    for name in "${source[@]}"; do
-        target[$(( ndx++ ))]=$( get_field_max_width "$name" )
+    local -i icount="${#source[*]}"
+    local -i ndx
+    local name
+    for (( ndx=0; ndx<icount; ++ndx )); do
+        target[$ndx]="${#FIELDNAMES[${source[$ndx]}]}"
     done
+
+    local line
+    local -a lparts
+    local IFS="$FIELD_DELIM"
+    local -i curlen
+
+    for line in "${LINES[@]}"; do
+        lparts=( $line )
+        for (( ndx=0; ndx<icount; ++ndx )); do
+            curlen="${#lparts[${source[$ndx]}]}"
+            if [ "$curlen" -gt "${target[$ndx]}" ]; then
+                target[$ndx]="$curlen"
+            fi
+        done
+    done
+
+    if [ "$margin" -gt 0 ]; then
+        for (( ndx=0; ndx<icount; ++ndx )); do
+            target[$ndx]=$(( target[$ndx] + $margin ))
+        done
+    fi
+}
+v
+# Supports select_fields() through display_selection_fields()
+get_max_field_name_length()
+{
+    local name
+    local -i maxlen=0
+    for name in "${FIELDNAMES[@]}"; do
+        if [ "${#name}" -gt "$maxlen" ]; then
+            maxlen="${#name}"
+        fi
+    done
+    echo "maxlen is $maxlen" >&2
+    echo "$maxlen"
 }
 
+# Supports select_fields(), this function refreshes the display
+# of field names and their status (included in report or not).
 display_selection_fields()
 {
     local -n sellist="$1"
@@ -179,6 +228,13 @@ display_selection_fields()
 
     local fname
     local -i ndx
+    local -i maxfnamelen=$( get_max_field_name_length )
+
+    local IFS="$FIELD_DELIM"
+    local -a sampleline=( ${LINES[0]} )
+    local sample
+
+    echo "LINES[0] = ${LINES[0]}"
 
     local -i curline=0
     for fname in "${FIELDNAMES[@]}"; do
@@ -186,15 +242,24 @@ display_selection_fields()
             echo -n "[44m"
         fi
 
+        ndx="${FIELDS[$fname]}"
+        echo "ndx is $ndx, ${sampleline[$ndx]} out of ${#sampleline[@]}"
+        sample="${sampleline[${FIELDS[$fname]}]}"
+
         if element_included sellist "$fname"; then
             echo -n "|X| "
         else
             echo -n "| | "
         fi
-        echo "$fname[m"
+        printf "%-${maxfnamelen}s [37;2m e.g. %s[m" "$fname" "$sample"
+        echo
     done
 }
 
+# Supports select_fields(), this function manipulates a
+# space-separated list of field names according to the
+# indicated name.  Adds to the list if not already included,
+# or removed from list if it's in the list.
 toggle_field()
 {
     local -n target="$1"
@@ -229,6 +294,11 @@ toggle_field()
     return 0
 }
 
+# "Dialog" that shows the collection of field names, from
+# which the user will select names.
+#
+# The result of the users' selections will be placed in the
+# indirect array variable initialized with $1.
 select_fields()
 {
     local -n target="$1"
@@ -268,6 +338,8 @@ select_fields()
     done
 }
 
+# Display the requested columns from the global LINES array
+# collected from the syslog file.
 show_lines()
 {
     local -a fields=( "$@" )
@@ -275,34 +347,33 @@ show_lines()
         fields=( ${!FIELDS[@]} )
     fi
     
-    local -a indicies=()
+    local -a indicies widths
     make_field_indicies_array indicies fields
-    make_field_widths_array widths fields
-
+    make_field_widths_array widths indicies 2
 
     local IFS="$FIELD_DELIM"
     local line value
     local -a lparts
     local -i ndx
-    local -i margin=2
     local -i colw valw
     local -i curcol
 
+    # Write a highlighted headers line
+    echo -n "[32;1m"
     curcol=0
     for ndx in "${indicies[@]}"; do
         colw="${widths[$(( curcol++ ))]}"
-        (( colw+=$margin ))
         format="%-${colw}s"
         printf "$format" "${FIELDNAMES[$ndx]}"
     done
-    echo
+    echo "[m"
 
+    # Write table details
     for line in "${LINES[@]}"; do
         lparts=( $line )
         curcol=0
         for ndx in "${indicies[@]}"; do
             colw="${widths[$(( curcol++ ))]}"
-            (( colw += $margin ))
             format="%-${colw}s"
             printf "$format" "${lparts[$ndx]}"
         done
@@ -318,8 +389,8 @@ main()
     local -a flist=()
 
     if select_fields flist; then
-        echo
-        echo "About to run show lines with ${flist[*]}"
+        clear_screen
+        top_screen
 
         show_lines "${flist[@]}"
     fi
