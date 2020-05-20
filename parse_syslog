@@ -128,7 +128,11 @@ read_syslog()
     local line
     local -i count=0
 
+    clear_screen
+
     while read -r line; do
+        top_screen
+        echo "Reading syslog line $count"
         if [[ "$line" =~ \.*IPT\.* ]]; then
             process_syslog_line "$line"
             (( ++count ))
