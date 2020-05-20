@@ -279,18 +279,30 @@ show_lines()
     make_field_indicies_array indicies fields
     make_field_widths_array widths fields
 
-    echo "widths = ${widths[*]}"
 
     local IFS="$FIELD_DELIM"
     local line value
     local -a lparts
     local -i ndx
+    local -i margin=2
     local -i colw valw
+    local -i curcol
+
+    curcol=0
+    for ndx in "${indicies[@]}"; do
+        colw="${widths[$(( curcol++ ))]}"
+        (( colw+=$margin ))
+        format="%-${colw}s"
+        printf "$format" "${FIELDNAMES[$ndx]}"
+    done
+    echo
+
     for line in "${LINES[@]}"; do
         lparts=( $line )
+        curcol=0
         for ndx in "${indicies[@]}"; do
-            colw="${widths[$ndx]}"
-            (( colw+=2 ))
+            colw="${widths[$(( curcol++ ))]}"
+            (( colw += $margin ))
             format="%-${colw}s"
             printf "$format" "${lparts[$ndx]}"
         done
