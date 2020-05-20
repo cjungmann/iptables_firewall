@@ -204,7 +204,7 @@ make_field_widths_array()
         done
     fi
 }
-v
+
 # Supports select_fields() through display_selection_fields()
 get_max_field_name_length()
 {
@@ -215,7 +215,7 @@ get_max_field_name_length()
             maxlen="${#name}"
         fi
     done
-    echo "maxlen is $maxlen" >&2
+
     echo "$maxlen"
 }
 
@@ -234,8 +234,6 @@ display_selection_fields()
     local -a sampleline=( ${LINES[0]} )
     local sample
 
-    echo "LINES[0] = ${LINES[0]}"
-
     local -i curline=0
     for fname in "${FIELDNAMES[@]}"; do
         if [ "$(( curline++ ))" -eq "$hilite" ]; then
@@ -243,7 +241,6 @@ display_selection_fields()
         fi
 
         ndx="${FIELDS[$fname]}"
-        echo "ndx is $ndx, ${sampleline[$ndx]} out of ${#sampleline[@]}"
         sample="${sampleline[${FIELDS[$fname]}]}"
 
         if element_included sellist "$fname"; then
@@ -307,7 +304,7 @@ select_fields()
     local -i active_line=0
     local -i line_limit="${#FIELDNAMES[@]}"
 
-    local prompt="UP or DOWN arrows to move, SPACE to toggle, a to accept, q to abort"
+    local prompt="UP or DOWN arrows to move, SPACE to toggle, ENTER to accept, q to abort"
     local keystroke
 
     while true; do
@@ -316,12 +313,17 @@ select_fields()
         display_selection_fields tmirror active_line
 
         keystroke=$( get_keypress "$prompt" )
+
+        if [ "${#keystroke}" -eq 0 ]; then
+            target=( "${tmirror[@]}" )
+            return 0
+        fi
+            
         case "$keystroke" in
             "$keypress_down_arrow" ) (( ++active_line )) ;;
             "$keypress_up_arrow" ) (( --active_line )) ;;
 
             ' ') tmirror=( $( toggle_field tmirror "${FIELDNAMES[$active_line]}" ) ) ;;
-            a ) target=( "${tmirror[@]}" ); return 0 ;;
             q ) return 1 ;;
             *)
                 if [ "${keystroke:0:1}" = "" ]; then
@@ -399,4 +401,3 @@ main()
 
 main
 echo
-
